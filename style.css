@@ -1,0 +1,6432 @@
+* {
+  box-sizing: border-box;
+}
+
+/* Paleta "moldura de console" (estilo menu de SRPG 16-bit): um punhado
+   fechado de tons reaproveitado em toda a moldura da UI (cartões, barra de
+   turno, botões, log, modais) — NÃO mexe nas cores de efeito de combate
+   (partículas/feixes/impactos mais abaixo no arquivo), que têm paleta
+   própria por tipo de dano. --bevel-light/--bevel-dark formam o relevo
+   pixelado (aresta clara em cima/esquerda, escura embaixo/direita) que
+   substitui o border-radius suave por cantos retos, como caixa de menu de
+   console — ver .pixel-panel logo abaixo.
+*/
+:root {
+  --panel-bg: #241f38;
+  --panel-bg-raised: #2b2740;
+  --panel-border: #4a4468;
+  --panel-ink: #e8e4f5;
+  --panel-ink-dim: #9a94b8;
+  --panel-gold: #f0c674;
+  --panel-blue: #4d8dff;
+  --panel-red: #ff5c5c;
+  --bevel-light: rgba(255, 255, 255, 0.16);
+  --bevel-dark: rgba(0, 0, 0, 0.6);
+  --console-font: "Consolas", "Courier New", ui-monospace, monospace;
+  /* Moldura pixelada reutilizável: relevo em vez de sombra suave (aresta
+     clara em cima/esquerda, escura embaixo/direita), pensada pra rodar
+     junto com border-radius: 0 (cantos retos, como caixa de menu de
+     console) — aplicada via `box-shadow: var(--pixel-bevel)` direto em
+     cada seletor que precisa dela (não dá pra "herdar" uma classe
+     utilitária sem mexer no HTML/JS que monta cada cartão dinamicamente),
+     mas todos os valores vêm das mesmas variáveis acima, então o relevo
+     fica idêntico em todo canto. */
+  --pixel-bevel: inset 2px 2px 0 var(--bevel-light), inset -2px -2px 0 var(--bevel-dark),
+    0 3px 0 rgba(0, 0, 0, 0.45);
+}
+
+body {
+  margin: 0;
+  padding: 24px;
+  font-family: "Segoe UI", Arial, sans-serif;
+  background: #1e1b2e;
+  color: #eee;
+  display: flex;
+  justify-content: center;
+}
+
+.game {
+  position: relative;
+  z-index: 1;
+  max-width: 1800px;
+  width: 98vw;
+}
+
+.battle-end-modal {
+  position: fixed;
+  inset: 0;
+  background: rgba(10, 8, 18, 0.78);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 100;
+}
+
+.battle-end-modal.hidden {
+  display: none;
+}
+
+/* Flash colorido (verde/vermelho) no instante em que a tela de fim de
+   partida abre — parte de transparente, pisca a cor do resultado, e
+   assenta no fundo escuro padrão do modal. Troca o "pop" simples de antes
+   por uma entrada com mais impacto, coerente com o flash de tela dos
+   golpes (ver flashScreen em game.js). */
+.battle-end-modal.victory-flash {
+  animation: battle-end-flash-victory 0.8s ease-out;
+}
+
+.battle-end-modal.defeat-flash {
+  animation: battle-end-flash-defeat 0.8s ease-out;
+}
+
+@keyframes battle-end-flash-victory {
+  0% {
+    background: rgba(111, 224, 138, 0);
+  }
+  15% {
+    background: rgba(111, 224, 138, 0.6);
+  }
+  45% {
+    background: rgba(111, 224, 138, 0.22);
+  }
+  100% {
+    background: rgba(10, 8, 18, 0.78);
+  }
+}
+
+@keyframes battle-end-flash-defeat {
+  0% {
+    background: rgba(255, 92, 92, 0);
+  }
+  15% {
+    background: rgba(255, 92, 92, 0.6);
+  }
+  45% {
+    background: rgba(255, 92, 92, 0.22);
+  }
+  100% {
+    background: rgba(10, 8, 18, 0.78);
+  }
+}
+
+.battle-end-box {
+  background: #201c30;
+  border: 3px solid var(--panel-gold);
+  border-radius: 0;
+  padding: 36px 56px;
+  text-align: center;
+  box-shadow: 0 0 40px rgba(240, 198, 116, 0.25), var(--pixel-bevel);
+  animation: battle-end-box-pop 0.5s cubic-bezier(0.34, 1.56, 0.64, 1) 0.1s backwards;
+}
+
+/* Entrada com "overshoot" (passa um pouco do tamanho final e volta) em vez
+   do fade simples — atrasada 0.1s pra aparecer logo depois do pico do
+   flash de fundo, não junto. */
+@keyframes battle-end-box-pop {
+  0% {
+    transform: scale(0.5) rotate(-3deg);
+    opacity: 0;
+  }
+  55% {
+    transform: scale(1.08) rotate(1deg);
+    opacity: 1;
+  }
+  75% {
+    transform: scale(0.96) rotate(-0.5deg);
+  }
+  100% {
+    transform: scale(1) rotate(0deg);
+    opacity: 1;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .battle-end-modal.victory-flash,
+  .battle-end-modal.defeat-flash {
+    animation: none;
+    background: rgba(10, 8, 18, 0.78);
+  }
+  .battle-end-box {
+    animation: none;
+  }
+}
+
+@keyframes battle-end-pop {
+  from {
+    transform: scale(0.85);
+    opacity: 0;
+  }
+  to {
+    transform: scale(1);
+    opacity: 1;
+  }
+}
+
+#battle-end-title {
+  font-family: var(--console-font);
+  text-transform: uppercase;
+  font-size: 2.2rem;
+  margin: 0 0 24px 0;
+  letter-spacing: 1px;
+}
+
+#battle-end-title.victory {
+  color: #6fe08a;
+  text-shadow: 0 0 16px rgba(111, 224, 138, 0.6);
+}
+
+#battle-end-title.defeat {
+  color: #ff5c5c;
+  text-shadow: 0 0 16px rgba(255, 92, 92, 0.6);
+}
+
+#battle-end-restart-btn {
+  background: var(--panel-gold);
+  color: #201c30;
+  border: 2px solid #c99a3f;
+  border-radius: 0;
+  box-shadow: var(--pixel-bevel);
+  padding: 10px 22px;
+  font-family: var(--console-font);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  font-weight: bold;
+  font-size: 1rem;
+  cursor: pointer;
+}
+
+#battle-end-restart-btn:active {
+  box-shadow: inset 2px 2px 0 rgba(0, 0, 0, 0.35), inset -2px -2px 0 rgba(255, 255, 255, 0.2);
+}
+
+#battle-end-restart-btn:hover {
+  background: #ffd98a;
+}
+
+.attack-confirm-modal {
+  position: fixed;
+  inset: 0;
+  background: rgba(10, 8, 18, 0.72);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 110;
+}
+
+.attack-confirm-modal.hidden {
+  display: none;
+}
+
+.attack-confirm-box {
+  background: #201c30;
+  border: 2px solid #8a7fd6;
+  border-radius: 0;
+  padding: 24px 28px;
+  min-width: 280px;
+  max-width: 380px;
+  box-shadow: 0 0 40px rgba(138, 127, 214, 0.25), var(--pixel-bevel);
+  animation: battle-end-pop 0.2s ease-out;
+}
+
+#attack-confirm-title {
+  margin: 0 0 14px 0;
+  font-family: var(--console-font);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  font-size: 1.1rem;
+  color: var(--panel-gold);
+  text-align: center;
+}
+
+.attack-confirm-body {
+  font-size: 0.95rem;
+  line-height: 1.6;
+  margin-bottom: 18px;
+}
+
+.attack-confirm-warning {
+  color: #ff9c5c;
+  margin-bottom: 8px;
+  font-style: italic;
+}
+
+.attack-confirm-bonus {
+  color: #6fe08a;
+}
+
+.attack-confirm-blocked {
+  color: #ff5c5c;
+  font-style: italic;
+}
+
+.attack-confirm-actions {
+  display: flex;
+  justify-content: center;
+  gap: 12px;
+}
+
+.attack-confirm-cancel-btn,
+.attack-confirm-ok-btn {
+  border: 2px solid var(--panel-border);
+  border-radius: 0;
+  box-shadow: var(--pixel-bevel);
+  padding: 10px 18px;
+  font-family: var(--console-font);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  font-weight: bold;
+  font-size: 0.95rem;
+  cursor: pointer;
+}
+
+.attack-confirm-cancel-btn:active,
+.attack-confirm-ok-btn:active {
+  box-shadow: inset 2px 2px 0 rgba(0, 0, 0, 0.35), inset -2px -2px 0 rgba(255, 255, 255, 0.2);
+}
+
+.attack-confirm-cancel-btn {
+  background: #4a4560;
+  color: #eee;
+}
+
+.attack-confirm-cancel-btn:hover {
+  background: #5c5675;
+}
+
+.attack-confirm-ok-btn {
+  background: var(--panel-gold);
+  color: #201c30;
+  border-color: #c99a3f;
+}
+
+.attack-confirm-ok-btn:hover {
+  background: #ffd98a;
+}
+
+.target-choice-actions {
+  flex-direction: column;
+  margin-bottom: 10px;
+}
+
+.target-choice-actions .attack-confirm-ok-btn {
+  width: 100%;
+}
+
+/* Escolha manual de direção (ver promptFacingChoice em game.js) — NÃO é
+   mais um modal grande cobrindo a tela (pedido do usuário: tampava o
+   próprio personagem na maioria das vezes). Em vez disso, 4 setinhas soltas
+   direto no tabuleiro, ao redor do token (posicionadas via
+   tileScreenPercent, igual floating-text/weapon-menu), + um botão de
+   confirmar logo abaixo — dá pra ver o personagem E a escolha ao mesmo
+   tempo, e o preview ao vivo (unit.facing muda a cada clique) fica visível
+   na hora. Criadas dinamicamente em JS (não existe HTML estático pra elas),
+   igual o resto dos popups que vivem em #board-overlay. */
+/* Posicionamento comum das duas peças do seletor de direção (setinhas +
+   confirmar) — o resto do visual de cada uma vem de regras próprias
+   (arrow-btn) ou é reaproveitado do grupo de "botão de console" existente
+   (confirm-btn, ver #end-turn-btn/.weapon-btn abaixo). */
+.facing-arrow-btn,
+.facing-confirm-btn {
+  position: absolute;
+  transform: translate(-50%, -50%);
+  pointer-events: auto;
+  z-index: 21;
+}
+
+.facing-arrow-btn {
+  width: 30px;
+  height: 30px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 2px solid var(--panel-border);
+  border-radius: 50%;
+  box-shadow: var(--pixel-bevel);
+  background: rgba(32, 28, 48, 0.85);
+  color: #eee;
+  font-size: 0.95rem;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.facing-arrow-btn:hover {
+  background: #5c5675;
+}
+
+.facing-arrow-btn.selected {
+  background: var(--panel-gold);
+  color: #201c30;
+  border-color: #c99a3f;
+}
+
+/* O resto do visual de .facing-confirm-btn (border/box-shadow/fonte/:active)
+   vem do grupo de botão de console compartilhado — ver
+   "#end-turn-btn, ..., .facing-confirm-btn" mais abaixo, que também define
+   os overrides de margin/padding (precisam vir DEPOIS daquele grupo na
+   cascata pra vencer, já que a especificidade é igual). */
+
+.unit-info-modal {
+  position: fixed;
+  inset: 0;
+  background: rgba(10, 8, 18, 0.72);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 110;
+}
+
+.unit-info-modal.hidden {
+  display: none;
+}
+
+.unit-info-box {
+  background: #201c30;
+  border: 2px solid #4d8dff;
+  border-radius: 0;
+  padding: 24px 28px;
+  min-width: 280px;
+  max-width: 460px;
+  box-shadow: 0 0 40px rgba(77, 141, 255, 0.25), var(--pixel-bevel);
+  animation: battle-end-pop 0.2s ease-out;
+}
+
+#unit-info-title {
+  margin: 0 0 14px 0;
+  font-family: var(--console-font);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  font-size: 1.1rem;
+  color: var(--panel-gold);
+  text-align: center;
+}
+
+.unit-info-body {
+  margin-bottom: 18px;
+}
+
+.unit-info-portrait {
+  display: block;
+  width: 96px;
+  height: 96px;
+  object-fit: cover;
+  margin: 0 auto 14px auto;
+  border-radius: 0;
+  border: 3px solid var(--panel-blue);
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.5);
+}
+
+.unit-info-section-label {
+  font-size: 0.8rem;
+  color: #9a94b8;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin: 10px 0 6px 0;
+}
+
+.unit-info-section-label:first-child {
+  margin-top: 0;
+}
+
+.unit-info-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.unit-info-empty {
+  font-style: italic;
+  color: #9a94b8;
+  font-size: 0.85rem;
+}
+
+.unit-info-actions {
+  display: flex;
+  justify-content: center;
+}
+
+.unit-info-status-row {
+  flex-direction: column;
+  gap: 4px;
+}
+
+.unit-info-status-entry {
+  font-size: 0.85rem;
+  background: rgba(255, 255, 255, 0.05);
+  border-radius: 6px;
+  padding: 4px 8px;
+}
+
+.unit-info-status-icon {
+  font-size: 1rem;
+}
+
+.unit-info-status-desc {
+  font-size: 0.75rem;
+  color: #b8b3cc;
+  margin-top: 2px;
+}
+
+/* Cena de batalha dedicada (estilo Fire Emblem SNES): overlay em tela cheia
+   que assume a tela inteira num ataque de alvo único (arma normal ou magia
+   de alvo único — nunca em magias de área), mostrando os dois sprites GRANDES
+   (mesma arte já usada minúscula no tabuleiro, sem asset novo) em vez do
+   golpe pequeno de sempre. z-index maior que os outros dois modais (100/110)
+   — nunca deve ficar atrás deles, embora na prática nunca coexistam. */
+.battle-scene-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 120;
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  pointer-events: auto;
+}
+
+.battle-scene-overlay.hidden {
+  display: none;
+}
+
+.battle-scene-backdrop {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  overflow: hidden;
+  /* Cor base bate com o RGB de fundo do CENARIO.png (a referência de onde
+     assets/scenery/battle_backdrop.png foi recortado) — sem costura visível
+     entre a imagem recortada e a borda do overlay. */
+  background: #16181c;
+}
+
+.battle-scene-backdrop-img {
+  position: absolute;
+  inset: 0;
+  background: url("assets/scenery/battle_backdrop.png") center / cover no-repeat;
+  opacity: 0.85;
+}
+
+.battle-scene-ground {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 18%;
+  z-index: 1;
+  background: linear-gradient(to top, rgba(10, 8, 18, 0.85), rgba(10, 8, 18, 0));
+}
+
+.battle-scene-fighter {
+  position: relative;
+  z-index: 2;
+  width: 38%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding-bottom: 6%;
+  animation: battle-scene-fighter-pop 0.4s cubic-bezier(0.34, 1.56, 0.64, 1) backwards;
+}
+
+.battle-scene-fighter-left {
+  margin-left: 4%;
+  align-items: flex-start;
+}
+
+.battle-scene-fighter-right {
+  margin-right: 4%;
+  align-items: flex-end;
+  animation-delay: 0.06s;
+}
+
+@keyframes battle-scene-fighter-pop {
+  0% {
+    transform: scale(0.7);
+    opacity: 0;
+  }
+  60% {
+    transform: scale(1.06);
+    opacity: 1;
+  }
+  100% {
+    transform: scale(1);
+    opacity: 1;
+  }
+}
+
+.battle-scene-sprite {
+  height: min(52vh, 480px);
+  width: auto;
+  image-rendering: pixelated;
+  filter: drop-shadow(0 12px 10px rgba(0, 0, 0, 0.55));
+}
+
+/* Nem herói nem inimigo tem convenção de espelhamento entre si hoje — os dois
+   já olham/golpeiam pra direita da tela (confirmado visualmente em
+   guerreiro_attack_3.png e orc_attack_3.png). Então o lado direito SEMPRE
+   espelha (fica de frente pro lado esquerdo), incondicionalmente — não
+   precisa checar por personagem. Aplicada direto no HTML, não via JS. */
+.battle-scene-sprite-mirrored {
+  transform: scaleX(-1);
+}
+
+.battle-scene-nameplate {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  width: 160px;
+  margin-bottom: 10px;
+  background: var(--panel-bg-raised);
+  border: 2px solid var(--panel-border);
+  box-shadow: var(--pixel-bevel);
+  padding: 6px 8px;
+  font-family: var(--console-font);
+}
+
+.battle-scene-fighter-right .battle-scene-nameplate {
+  align-items: flex-end;
+}
+
+.battle-scene-name {
+  font-size: 0.85rem;
+  font-weight: bold;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--panel-gold);
+}
+
+.battle-scene-hpbar {
+  width: 100%;
+  height: 10px;
+  background: #443f5e;
+  border: 1px solid var(--panel-border);
+}
+
+.battle-scene-hpfill {
+  height: 100%;
+  width: 100%;
+  background: #4dff88;
+  transition: width 0.3s ease;
+}
+
+/* Entrada/saída do overlay em si (fade), separada do "pop" de cada lutador
+   acima — as duas rodam juntas quando a classe .entering é aplicada. */
+.battle-scene-overlay.entering {
+  animation: battle-scene-fade-in 0.25s ease-out;
+}
+
+.battle-scene-overlay.leaving {
+  animation: battle-scene-fade-out 0.25s ease-in;
+}
+
+@keyframes battle-scene-fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes battle-scene-fade-out {
+  from {
+    opacity: 1;
+  }
+  to {
+    opacity: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .battle-scene-overlay.entering,
+  .battle-scene-overlay.leaving {
+    animation: none;
+  }
+  .battle-scene-fighter {
+    animation: none;
+  }
+}
+
+.card-passive-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 3px;
+}
+
+.card-passive-badge {
+  font-size: 0.8rem;
+  line-height: 1;
+  cursor: help;
+}
+
+.card-status-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 3px;
+  margin-top: 0;
+}
+
+.card-status-icon {
+  font-size: 0.95rem;
+  line-height: 1;
+}
+
+/* Ambientação de fundo: recorte de assets/scenery/backdrop_strip.png (extraído
+   de uma referência isométrica) atrás de TUDO — fora da caixa de conteúdo do
+   jogo (.game é z-index:1), então nunca compete com a moldura de console dos
+   painéis nem precisa negociar com --panel-bg/--bevel-*. Opacidade baixa de
+   propósito: é atmosfera de margem de página, não um cenário pra reparar. Cai
+   limpo no #1e1b2e de sempre se o arquivo não existir (background-image
+   quebrado não aparece feio como um <img> quebraria). */
+#bg-scenery {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  opacity: 0.4;
+  background: url("assets/scenery/backdrop_strip.png") center bottom / cover no-repeat, #1e1b2e;
+}
+
+.bg-half {
+  position: fixed;
+  top: 0;
+  bottom: 0;
+  width: 50%;
+  opacity: 0;
+  transition: opacity 0.4s ease;
+  pointer-events: none;
+  z-index: 0;
+}
+
+.bg-left {
+  left: 0;
+  background: #4d8dff;
+}
+
+.bg-right {
+  right: 0;
+  background: #ff5c5c;
+}
+
+.bg-half.active {
+  animation: bg-half-breathe 3.5s ease-in-out infinite;
+}
+
+@keyframes bg-half-breathe {
+  0%, 100% {
+    opacity: 0.16;
+  }
+  50% {
+    opacity: 0.26;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .bg-half.active {
+    animation: none;
+    opacity: 0.22;
+  }
+}
+
+.control-toggle {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 10px;
+  font-size: 0.72rem;
+  text-align: center;
+}
+
+.control-toggle-label {
+  color: var(--panel-ink-dim);
+  font-family: var(--console-font);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.toggle-btn {
+  background: var(--panel-bg-raised);
+  color: var(--panel-ink-dim);
+  border: 2px solid var(--panel-border);
+  border-radius: 0;
+  box-shadow: var(--pixel-bevel);
+  padding: 5px 10px;
+  font-family: var(--console-font);
+  font-size: 0.78rem;
+  font-weight: bold;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  cursor: pointer;
+}
+
+.toggle-btn:hover {
+  background: #3a3454;
+}
+
+/* Estado "pressionado": inverte o relevo (fundo escuro em vez de claro no
+   canto superior-esquerdo) pra parecer um botão de console afundado, em vez
+   de só trocar a cor de fundo. */
+.toggle-btn.active {
+  background: var(--panel-red);
+  color: #201c30;
+  border-color: #a83a3a;
+  box-shadow: inset 2px 2px 0 rgba(0, 0, 0, 0.35), inset -2px -2px 0 rgba(255, 255, 255, 0.25);
+}
+
+.main-layout {
+  display: flex;
+  align-items: flex-start;
+  gap: 16px;
+}
+
+.center-column {
+  flex: 1;
+  min-width: 0;
+}
+
+.global-turn-counter {
+  position: absolute;
+  top: 0;
+  right: 0;
+  z-index: 20;
+  display: block;
+  font-size: 0.85rem;
+  color: #a9a4c9;
+  background: #201c30;
+  border: 1px solid #3a3556;
+  border-radius: 6px;
+  padding: 4px 10px;
+  margin: 0;
+}
+
+.turn-order-column {
+  flex: 0 0 130px;
+  width: 130px;
+  min-width: 0;
+}
+
+.turn-order {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+.turn-order-heading {
+  font-family: var(--console-font);
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  color: var(--panel-ink-dim);
+  text-align: center;
+  margin-bottom: 2px;
+}
+
+.turn-order-entry {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: var(--panel-bg-raised);
+  border-radius: 0;
+  padding: 4px 6px;
+  border: 2px solid var(--panel-border);
+  box-shadow: var(--pixel-bevel);
+  font-size: 0.72rem;
+  transition: opacity 0.3s ease, border-color 0.3s ease, transform 0.35s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+/* Entrada de quem é novo na janela de 10 (não existia no render anterior)
+   — quem só mudou de posição usa o FLIP em JS (ver renderTurnOrder), não
+   isso aqui. */
+.turn-order-entry.entering {
+  animation: turn-order-entry-in 0.3s ease-out;
+}
+
+@keyframes turn-order-entry-in {
+  from {
+    opacity: 0;
+    transform: scale(0.85);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .turn-order-entry {
+    transition: opacity 0.3s ease, border-color 0.3s ease;
+  }
+  .turn-order-entry.entering {
+    animation: none;
+  }
+}
+
+.turn-order-entry.player {
+  border-color: #4d8dff;
+}
+
+.turn-order-entry.enemy {
+  border-color: #ff5c5c;
+}
+
+.turn-order-entry.current {
+  border-color: var(--panel-gold);
+  box-shadow: var(--pixel-bevel), 0 0 6px rgba(240, 198, 116, 0.6);
+}
+
+.turn-order-index {
+  font-family: var(--console-font);
+  font-size: 0.65rem;
+  color: var(--panel-ink-dim);
+  min-width: 12px;
+  text-align: center;
+}
+
+.turn-order-icon {
+  font-size: 1rem;
+  line-height: 1;
+}
+
+.turn-order-name {
+  font-family: var(--console-font);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.roster {
+  flex: 0 0 245px;
+  width: 245px;
+  display: grid;
+  grid-template-columns: 1fr;
+  align-content: start;
+  gap: 8px;
+  min-width: 0;
+}
+
+.unit-card {
+  background:
+    linear-gradient(100deg, rgba(255,255,255,.07), transparent 38%),
+    linear-gradient(180deg, #3a3a43 0%, #24242d 52%, #171820 100%);
+  border-radius: 0;
+  padding: 4px;
+  font-size: 0.72rem;
+  font-family: var(--console-font);
+  border: 2px solid #777780;
+  box-shadow:
+    inset 1px 1px 0 rgba(255,255,255,.32),
+    inset -2px -2px 0 rgba(0,0,0,.72),
+    0 2px 0 rgba(0,0,0,.5);
+  min-width: 0;
+  transition: opacity 0.3s ease, border-color 0.3s ease, background 0.3s ease, box-shadow 0.3s ease;
+}
+
+.unit-card.player {
+  border-color: var(--panel-blue);
+}
+
+.unit-card.enemy {
+  border-color: var(--panel-red);
+  text-align: right;
+}
+
+.card-main-row {
+  display: flex;
+  align-items: stretch;
+  gap: 5px;
+  min-height: 66px;
+}
+
+.unit-card.enemy .card-main-row {
+  flex-direction: row-reverse;
+}
+
+.card-core {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+}
+
+.card-header-row {
+  display: flex;
+  align-items: center;
+  min-height: 17px;
+  padding: 0 3px 2px;
+  color: #f2eee1;
+  text-shadow: 1px 1px 0 #000;
+  letter-spacing: .025em;
+}
+
+.unit-card.enemy .card-header-row {
+  justify-content: flex-end;
+}
+
+/* Ícone + barra na mesma linha (em vez de "HP: 35/35" numa linha e a barra
+   embaixo) — mesma info em menos altura. Espelhado pro lado inimigo,
+   igual .card-header-row já fazia. */
+.stat-row {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  margin: 1px 0;
+}
+
+.unit-card.enemy .stat-row {
+  flex-direction: row;
+}
+
+.stat-icon {
+  flex: 0 0 19px;
+  width: 19px;
+  color: #e8e4d9;
+  font-family: Georgia, serif;
+  font-size: 0.68rem;
+  font-weight: 900;
+  text-align: right;
+  text-shadow: 1px 1px 0 #000;
+  line-height: 1;
+}
+
+.card-detail-row {
+  display: flex;
+  align-items: center;
+  min-height: 15px;
+  gap: 5px;
+  margin-top: 3px;
+  padding: 2px 3px 0;
+  border-top: 1px solid rgba(210,210,220,.22);
+}
+
+.card-mini-row {
+  display: flex;
+  gap: 10px;
+  margin: 0;
+  font-size: 0.68rem;
+  color: #b3aed1;
+}
+
+.unit-card.enemy .card-mini-row {
+  justify-content: flex-end;
+}
+
+.mini-stat {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.card-portrait {
+  width: 62px;
+  height: 66px;
+  object-fit: cover;
+  object-position: center top;
+  border-radius: 0;
+  border: 2px ridge #8b8b91;
+  background: #151720;
+  box-shadow: inset 0 0 8px rgba(0,0,0,.65);
+  flex-shrink: 0;
+}
+
+/* Reação de dano no portrait (ver playHitReaction em game.js) — amplitude
+   em px, não %, porque o portrait é pequeno (28x28) e um shake percentual
+   ficaria exagerado nesse tamanho. */
+.card-portrait.portrait-hit {
+  animation: portrait-hit-flash 0.4s ease-in-out;
+}
+
+@keyframes portrait-hit-flash {
+  0%, 100% {
+    transform: translate(0, 0);
+    filter: brightness(1) saturate(1);
+    box-shadow: none;
+  }
+  15% {
+    transform: translate(-3px, 1px);
+    filter: brightness(1.8) saturate(0.5);
+    box-shadow: 0 0 0 2px #ff5c5c;
+  }
+  35% {
+    transform: translate(2px, -1px);
+    box-shadow: 0 0 0 2px #ff5c5c;
+  }
+  55% {
+    transform: translate(-2px, 1px);
+    filter: brightness(1.3);
+    box-shadow: 0 0 0 1px #ff5c5c;
+  }
+  75% {
+    transform: translate(1px, 0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .card-portrait.portrait-hit {
+    animation: none;
+  }
+}
+
+/* Antes só trocava a cor da borda — pouco visível no meio do roster. Agora
+   o cartão inteiro fica com um fundo dourado (gradiente pra não ficar chapado)
+   e um brilho ao redor, bem mais óbvio de achar de relance quem está jogando. */
+.unit-card.active-turn {
+  border-color: var(--panel-gold);
+  background: linear-gradient(135deg, #6b5a2a, #8a7128);
+  box-shadow: var(--pixel-bevel), 0 0 10px 2px rgba(240, 198, 116, 0.6);
+}
+
+.unit-card.defeated {
+  opacity: 0.35;
+}
+
+/* As três barras (HP/CT/MP) agora hospedam o valor por cima delas — mais
+   altas que antes (eram 5-8px) pra caber o texto, position:relative pro
+   .bar-value filho poder se centralizar por cima com position:absolute. */
+.hpbar,
+.ctbar,
+.mpbar {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+  background: #11131a;
+  border: 1px solid #85858b;
+  border-radius: 0;
+  height: 12px;
+  overflow: hidden;
+  box-shadow: inset 1px 1px 2px rgba(0,0,0,.9), 1px 1px 0 rgba(255,255,255,.12);
+}
+
+.hpfill,
+.ctfill,
+.mpfill {
+  position: absolute;
+  left: 0;
+  top: 0;
+  height: 100%;
+  width: 0%;
+  transition: width 0.3s ease;
+}
+
+/* Rápida (quase instantânea) de propósito — o valor "de verdade" já cai na
+   hora do golpe; quem demora a acompanhar é o .hp-chip logo abaixo, criando
+   o efeito clássico de "dano residual" (fighting game) entre os dois. */
+.hpfill {
+  background: linear-gradient(180deg, #a9d8a1, #5a9362 58%, #315c3d);
+  width: 100%;
+  transition: width 0.15s ease;
+}
+
+.ctfill {
+  background: linear-gradient(180deg, #e2c996, #a9824f 58%, #64482c);
+}
+
+.mpfill {
+  background: linear-gradient(180deg, #a9cde1, #5685a6 58%, #34516d);
+  width: 100%;
+}
+
+/* "Enche da direita pra esquerda" nos cards inimigos — antes era
+   margin-left:auto (só funciona em fluxo normal); agora que .hpfill/.ctfill
+   são position:absolute (pro valor poder se sobrepor à barra), o jeito
+   certo é ancorar pela direita em vez da esquerda. */
+.enemy-fill {
+  background: linear-gradient(180deg, #e8a09a, #a34e51 58%, #652d34);
+  left: auto;
+  right: 0;
+}
+
+.enemy-ctfill {
+  background: linear-gradient(180deg, #e2c996, #a9824f 58%, #64482c);
+  left: auto;
+  right: 0;
+}
+
+/* Dano residual: nasce "grudado" no valor de HP anterior (setado via JS em
+   updateUnitCardContent, sem transição) e só depois relaxa devagar pro
+   valor novo — como .hpfill (opaco, por cima dela no DOM) já caiu na hora,
+   só a "sobra" entre os dois valores fica visível, encolhendo aos poucos.
+   Cura não usa esse efeito (ver JS) — só perda de HP. */
+.hp-chip {
+  position: absolute;
+  left: 0;
+  top: 0;
+  height: 100%;
+  width: 100%;
+  background: #fff;
+  opacity: 0.75;
+  transition: width 0.6s ease 0.15s;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .hp-chip {
+    transition: none;
+  }
+}
+
+.hp-value,
+.ct-value,
+.mp-value {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.58rem;
+  font-weight: bold;
+  color: #fff;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.85);
+  pointer-events: none;
+  white-space: nowrap;
+}
+
+.turn-info {
+  position: relative;
+  min-height: 58px;
+  text-align: center;
+  margin-bottom: 12px;
+}
+
+@media (max-width: 900px) {
+  .global-turn-counter {
+    position: static;
+    width: fit-content;
+    margin: 8px auto 0;
+  }
+}
+
+#turn-indicator {
+  font-family: var(--console-font);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  font-weight: bold;
+  margin-bottom: 6px;
+  color: var(--panel-gold);
+}
+
+.hidden {
+  display: none !important;
+}
+
+/* Botões "de console": cantos retos + relevo pixelado (--pixel-bevel) em
+   vez de sombra suave; :active afunda o relevo (mesma ideia do
+   .toggle-btn.active) pra simular o botão sendo "apertado".
+*/
+#end-turn-btn,
+#top-back-btn,
+#restart-btn,
+.weapon-btn,
+.facing-confirm-btn {
+  border: 2px solid var(--panel-border);
+  border-radius: 0;
+  box-shadow: var(--pixel-bevel);
+  padding: 6px 12px;
+  font-family: var(--console-font);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  font-weight: bold;
+  cursor: pointer;
+  margin: 2px;
+}
+
+#end-turn-btn:active:not(:disabled),
+#top-back-btn:active,
+#restart-btn:active,
+.weapon-btn:active:not(:disabled),
+.facing-confirm-btn:active {
+  box-shadow: inset 2px 2px 0 rgba(0, 0, 0, 0.35), inset -2px -2px 0 rgba(255, 255, 255, 0.2);
+}
+
+/* Overrides de .facing-confirm-btn: precisam ficar depois do grupo acima
+   (mesma especificidade — quem vem depois na cascata vence). margin:0 evita
+   que o margin:2px do grupo desalinhe o botão, posicionado via
+   tileScreenPercent (position:absolute + translate, ver mais acima). */
+.facing-confirm-btn {
+  margin: 0;
+  border-color: #c99a3f;
+  background: var(--panel-gold);
+  color: #201c30;
+  font-size: 0.75rem;
+  padding: 4px 10px;
+  white-space: nowrap;
+}
+
+.facing-confirm-btn:hover {
+  background: #ffd98a;
+}
+
+#top-back-btn {
+  background: var(--panel-bg-raised);
+  color: var(--panel-ink);
+  border-color: var(--panel-border);
+}
+
+#top-back-btn:hover {
+  background: #5a5478;
+}
+
+.weapon-btn {
+  width: 100%;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  background: linear-gradient(180deg, #dad5c5, #aaa592);
+  color: #27251f;
+  border-color: #716d60;
+  font-size: 0.72rem;
+  text-align: left;
+  white-space: nowrap;
+}
+
+.weapon-btn:hover {
+  background: linear-gradient(180deg, #f1ecda, #c4bea9);
+}
+
+.weapon-btn:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.weapon-wrapper {
+  position: relative;
+  display: block;
+  width: 100%;
+}
+
+.weapon-tooltip {
+  display: none;
+  position: absolute;
+  top: 50%;
+  bottom: auto;
+  left: calc(100% + 8px);
+  transform: translateY(-50%);
+  background: #12101c;
+  border: 2px solid var(--panel-blue);
+  border-radius: 0;
+  box-shadow: var(--pixel-bevel);
+  padding: 8px 10px;
+  font-size: 0.75rem;
+  font-weight: normal;
+  line-height: 1.5;
+  white-space: nowrap;
+  text-align: left;
+  color: #eee;
+  z-index: 10;
+  pointer-events: none;
+}
+
+.weapon-tooltip strong {
+  color: var(--panel-gold);
+}
+
+.weapon-wrapper:hover .weapon-tooltip {
+  display: block;
+}
+
+#end-turn-btn {
+  background: var(--panel-gold);
+  color: #2a2110;
+  border-color: #c99a3f;
+}
+
+#end-turn-btn:hover {
+  background: #ffd98a;
+}
+
+#end-turn-btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+#restart-btn {
+  background: var(--panel-bg-raised);
+  color: var(--panel-ink);
+  border-color: var(--panel-border);
+}
+
+#restart-btn:hover {
+  background: #5a5478;
+}
+
+.board-wrapper {
+  position: relative;
+  /* Tabuleiro/cena 3D como elemento dominante da tela ("tela cheia" —
+     pedido do usuário): cresce com a largura disponível, teto de altura
+     bem alto (90vh) pra sobrar o mínimo de moldura possível — o resto da
+     página (fileiras de personagem, log) pode precisar de scroll abaixo
+     disso, aceitável já que o tabuleiro é a prioridade. margin:auto
+     centraliza quando a coluna central é mais larga que o teto permite. */
+  width: min(100%, 90vh);
+  margin-inline: auto;
+  aspect-ratio: 1 / 1;
+  background: radial-gradient(120% 100% at 50% 0%, #1a1730 0%, #0e0c17 70%);
+  border: 3px solid var(--panel-border);
+  border-radius: 0;
+  padding: 4px;
+  /* Vinheta original (sombra de queda + escurecido interno) + relevo
+     pixelado (aresta clara/escura) por cima — mesma moldura de console dos
+     outros painéis, sem mudar padding/inset (ver nota abaixo). */
+  box-shadow: 0 24px 34px -16px rgba(0, 0, 0, 0.75), inset 0 2px 10px rgba(0, 0, 0, 0.5), var(--pixel-bevel);
+  /* Margin (não padding) — não pode entrar na caixa que .board/.unit-layer/
+     .board-overlay usam como referência, senão elas ficam maiores que o
+     tabuleiro de verdade e o personagem "descola" do próprio tile. */
+  margin-bottom: 26px;
+}
+
+/* Vinheta cinematográfica: escurece os cantos do tabuleiro pra puxar o olho
+   pro centro da ação, em vez do grid ficar uniformemente iluminado até a
+   borda. Pendurada no #board (não no #board-wrapper) de propósito: assim ela
+   entra na ordem natural do DOM ANTES de #unit-layer/#board-overlay (que não
+   têm z-index próprio, então empilham por ordem de DOM) — fica por cima dos
+   tiles mas embaixo de token/efeito/flash, sem precisar mexer em z-index.
+   position:absolute tira ela do fluxo do grid, então não vira uma 170ª
+   célula. */
+.board::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: 0;
+  background: radial-gradient(120% 120% at 50% 45%, transparent 55%, rgba(0, 0, 0, 0.55) 100%);
+  pointer-events: none;
+}
+
+/* .board, .board-overlay e .unit-layer são as três IRMÃS empilhadas dentro
+   de .board-wrapper — de propósito TODAS "position:absolute; inset:0" e
+   sem nenhuma borda/padding própria, pra ocuparem exatamente o mesmo
+   retângulo. Qualquer diferença de caixa entre elas é o que fazia o
+   personagem parecer estar num tile diferente de onde ele está de verdade
+   (bug real, corrigido nesta sessão).
+*/
+.board {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  grid-template-columns: repeat(13, 1fr);
+  grid-template-rows: repeat(13, 1fr);
+  /* O grid segue clicável e legível por realces/contornos, mas sem as
+     frestas grossas que faziam terreno contínuo parecer 169 quadrados. */
+  gap: 0;
+  z-index: 1;
+}
+
+/* Leito único do rio sobre o chão e abaixo das construções/unidades. O
+   traçado curvo não é mais recortado pelos quadrados da grade. */
+.river-layer {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  overflow: hidden;
+  z-index: 2;
+}
+
+.river-bank-stroke,
+.river-water-stroke {
+  fill: none;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  filter: url("#river-organic-edge");
+}
+
+.river-bank-stroke {
+  stroke: #36582e;
+  stroke-width: 1.3;
+  opacity: 1;
+}
+
+.river-water-stroke {
+  stroke: url("#river-depth");
+  stroke-width: 1.02;
+}
+
+.river-current {
+  fill: none;
+  stroke: rgba(205, 247, 245, 0.48);
+  stroke-width: 0.055;
+  stroke-linecap: round;
+  stroke-dasharray: 0.2 0.32;
+  animation: river-current-drift 7s linear infinite;
+}
+
+.river-flow-band {
+  fill: none;
+  stroke-linecap: round;
+  pointer-events: none;
+}
+
+.river-flow-band-a {
+  stroke: rgba(173, 233, 238, 0.32);
+  stroke-width: 0.16;
+  stroke-dasharray: 0.045 0.105;
+  animation: river-flow-down 3.2s linear infinite;
+}
+
+.river-flow-band-b {
+  stroke: rgba(224, 253, 248, 0.38);
+  stroke-width: 0.055;
+  stroke-dasharray: 0.02 0.07;
+  stroke-dashoffset: 0.43;
+  animation: river-flow-down 1.9s linear infinite;
+}
+
+@keyframes river-current-drift {
+  to { stroke-dashoffset: -2.08; }
+}
+
+@keyframes river-flow-down {
+  to { stroke-dashoffset: -1; }
+}
+
+/* Poeira ambiente: pontinhos de luz subindo devagar, só decoração (some por
+   trás de tudo que importa). Puramente CSS — 8 elementos fixos no HTML, cada
+   um com posição/tempo/atraso próprios via nth-child, looping infinito, pra
+   não precisar de JS gerando/limpando partículas o tempo todo. */
+.board-ambient {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.dust-mote {
+  position: absolute;
+  bottom: -4%;
+  width: 3px;
+  height: 3px;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(240, 198, 116, 0.85) 0%, rgba(240, 198, 116, 0) 75%);
+  animation: dust-drift linear infinite;
+  opacity: 0;
+}
+
+@keyframes dust-drift {
+  0% {
+    opacity: 0;
+    transform: translateY(0) translateX(0);
+  }
+  12% {
+    opacity: 0.7;
+  }
+  85% {
+    opacity: 0.35;
+  }
+  100% {
+    opacity: 0;
+    transform: translateY(-108%) translateX(var(--drift-x, 12px));
+  }
+}
+
+.dust-mote:nth-child(1) { left: 8%; animation-duration: 14s; animation-delay: -1s; --drift-x: 10px; }
+.dust-mote:nth-child(2) { left: 22%; animation-duration: 18s; animation-delay: -6s; --drift-x: -14px; }
+.dust-mote:nth-child(3) { left: 37%; animation-duration: 12s; animation-delay: -3s; --drift-x: 8px; }
+.dust-mote:nth-child(4) { left: 51%; animation-duration: 20s; animation-delay: -12s; --drift-x: -10px; }
+.dust-mote:nth-child(5) { left: 64%; animation-duration: 15s; animation-delay: -8s; --drift-x: 14px; }
+.dust-mote:nth-child(6) { left: 76%; animation-duration: 17s; animation-delay: -2s; --drift-x: -8px; }
+.dust-mote:nth-child(7) { left: 89%; animation-duration: 13s; animation-delay: -10s; --drift-x: 12px; }
+.dust-mote:nth-child(8) { left: 95%; animation-duration: 19s; animation-delay: -5s; --drift-x: -12px; }
+
+@media (prefers-reduced-motion: reduce) {
+  .dust-mote {
+    animation: none;
+    opacity: 0;
+  }
+}
+
+/* z-index explícito (não mais auto) DE PROPÓSITO: precisa vencer o canvas
+   3D como um bloco só (ver .scene3d-canvas abaixo) — sem isso, cada filho
+   individual (.weapon-menu=20, mas .area-glow=3, .impact-effect=8 etc.)
+   competiria sozinho contra o canvas, e os de valor baixo perderiam. Um
+   z-index aqui no CONTAINER cria um contexto de empilhamento novo: todo
+   descendente passa a ser comparado com os irmãos do container usando ESSE
+   valor, não o próprio. */
+.board-overlay {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  overflow: visible;
+  z-index: 10;
+}
+
+/* Visão 3D opcional — quando ativada pelo botão, cobre
+   .board/.structure-layer/.board-ambient/.unit-layer visualmente. Esses 4
+   continuam existindo e sendo atualizados por baixo, invisíveis —
+   render()/getOrCreateUnitToken (game.js) não foram apagados de propósito:
+   várias funções de animação (playAttackAnimation, spawnWeaponTrail...)
+   dependem do token DOM existir pra disparar, então "esconder" é bem mais
+   seguro que "deletar" aqui (ver plano de migração).
+   z-index 6, NÃO auto/1: alguns elementos do board antigo têm z-index
+   PRÓPRIO explícito maior que auto (.unit-token=4, .structure=2,
+   .terrain-icon até 3) — um canvas com z-index baixo demais perde pra eles
+   e os "personagens/castelo/cachoeira 2D" vazam por cima da cena 3D (bug
+   real, já visto). 6 fica acima de todo esse grupo, mas abaixo de
+   #board-overlay (10, ver acima) — menus/modais/VFX que vivem lá dentro
+   continuam por CIMA da cena 3D, com posição corrigida pra projeção 3D via
+   tileScreenPercent() em game.js. O botão de toggle (#scene3d-toggle-btn)
+   permite voltar ao modo 2D padrão. */
+.scene3d-canvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  display: block;
+  z-index: 6;
+  background: #14101c;
+}
+
+.scene3d-zoom-controls {
+  position: absolute;
+  right: 10px;
+  bottom: 10px;
+  display: grid;
+  grid-template-columns: repeat(2, auto);
+  gap: 4px;
+  padding: 5px;
+  z-index: 12;
+  background: rgba(20, 16, 28, 0.82);
+  border: 1px solid rgba(138, 127, 214, 0.7);
+  border-radius: 6px;
+  pointer-events: auto;
+}
+
+.scene3d-zoom-controls button,
+.scene3d-zoom-controls span {
+  min-width: 28px;
+  height: 25px;
+  display: grid;
+  place-items: center;
+  border-radius: 3px;
+  font: inherit;
+  font-size: 0.72rem;
+}
+
+.scene3d-zoom-controls button {
+  color: #f6e9c7;
+  background: #302a48;
+  border: 1px solid #5d5287;
+  cursor: pointer;
+}
+
+.scene3d-zoom-controls button:hover {
+  background: #493e70;
+}
+
+.scene3d-zoom-controls span {
+  color: #d8d0ff;
+  font-weight: bold;
+}
+
+#scene3d-zoom-reset-btn {
+  grid-column: span 2;
+}
+
+.unit-layer {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  overflow: visible;
+  z-index: 4;
+}
+
+/* Frente translúcida do rio: fica acima somente dos tokens, abaixo dos
+   feedbacks e menus. Estruturas continuam na própria camada e nunca recebem
+   esta máscara, portanto não parecem afundar na água. */
+.water-foreground-layer {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  overflow: hidden;
+  z-index: 5;
+}
+
+.water-foreground {
+  position: absolute;
+  overflow: hidden;
+}
+
+.water-foreground::before {
+  content: "";
+  position: absolute;
+  inset: 43% -8% -8%;
+  background:
+    linear-gradient(180deg, rgba(132, 211, 226, 0.38), rgba(26, 91, 137, 0.78)),
+    repeating-linear-gradient(108deg, transparent 0 9px, rgba(215, 250, 255, 0.28) 10px 12px, transparent 13px 24px);
+  background-position: var(--water-phase-x) var(--water-phase-y), var(--water-phase-x) var(--water-phase-y);
+  border-top: 1px solid rgba(211, 250, 255, 0.62);
+  border-radius: 45% 55% 0 0 / 9% 12% 0 0;
+  animation: water-flow 9s linear infinite;
+}
+
+/* Castelo/Montanha: camada própria (não filho de .tile) — um sprite só
+   cobrindo o bloco 3x3 inteiro, não um ícone repetido por tile como
+   árvore/casa. z-index explícito (2) fica abaixo do .unit-token (4), então
+   quem estiver ocupando a estrutura continua desenhado por cima dela, igual
+   já acontece em cima da casa. pointer-events:none — o clique continua sendo
+   tratado pelos .tile de baixo (ver onTileClick/structureAt). */
+.structure-layer {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  overflow: visible;
+}
+
+.structure {
+  position: absolute;
+  z-index: 3;
+  background-size: contain;
+  background-repeat: no-repeat;
+  background-position: bottom center;
+}
+
+.structure-castle {
+  background-image: url("assets/tiles/castle.png");
+  filter: drop-shadow(0 7px 5px rgba(10, 15, 12, 0.56));
+}
+
+.structure-castle::after,
+.structure-mountain::after {
+  content: "";
+  position: absolute;
+  left: 11%;
+  right: 11%;
+  bottom: 5%;
+  height: 12%;
+  border-radius: 50%;
+  background: radial-gradient(ellipse, rgba(18, 20, 12, 0.46), transparent 70%);
+  z-index: -1;
+}
+
+.structure-castle.destroyed {
+  background-image: url("assets/tiles/rubble-castle.png");
+  background-size: 55% auto;
+}
+
+.structure-mountain {
+  background-image: url("assets/tiles/mountain.png");
+  filter: drop-shadow(0 8px 6px rgba(10, 15, 12, 0.62));
+}
+
+.structure-mountain.destroyed {
+  background-image: url("assets/tiles/rubble-mountain.png");
+  background-size: 65% auto;
+}
+
+.tile.structure-tile {
+  cursor: pointer;
+}
+
+.unit-token {
+  position: absolute;
+  width: calc(100% / 13);
+  height: calc(100% / 13);
+  transform: translate(-50%, -50%);
+  transition: left 0.25s ease, top 0.25s ease;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  /* Maior que o z-index dos ícones de terreno (.terrain-icon vai até 3) —
+     sem isso, um personagem em cima de uma casa (ver "subir" em
+     computeReachable) ficava desenhado ATRÁS do telhado, porque
+     z-index:auto (o token não tinha nenhum antes) sempre perde pra
+     qualquer z-index numérico explícito, não importa a ordem no DOM. */
+  z-index: 4;
+}
+
+.unit-token.flying-unit {
+  z-index: 6;
+}
+
+.unit-token-inner {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  font-size: 1.1rem;
+  --lunge-x: 0%;
+  --lunge-y: 0%;
+}
+
+/* Sombra no "chão" embaixo de cada unidade — reforça a ilusão de que elas
+   estão de pé no tile, não flutuando por cima dele. */
+.unit-token-inner::before {
+  content: "";
+  position: absolute;
+  bottom: -15%;
+  left: 50%;
+  width: 65%;
+  height: 28%;
+  transform: translateX(-50%);
+  background: radial-gradient(ellipse, rgba(0, 0, 0, 0.55) 0%, transparent 70%);
+  pointer-events: none;
+  z-index: -1;
+}
+
+/* Boneco articulado (cabeça = emoji, tronco+braços, pernas), tipo os
+   modelos "chibi" do Final Fantasy Tactics: cabeça grande no topo, corpo
+   pequeno embaixo, em vez de um emoji flutuando sobre uma mancha de cor.
+   Tudo colorido por --body-color (setado em getOrCreateUnitToken a partir
+   de unit.bodyColor). */
+.unit-token-icon {
+  position: absolute;
+  top: -8%;
+  left: 50%;
+  transform: translateX(-50%);
+  font-size: 1em;
+  line-height: 1;
+  filter: drop-shadow(0 2px 2px rgba(0, 0, 0, 0.5));
+}
+
+/* Sprite de verdade (PNG), quando existe pra unidade — substitui o boneco de
+   CSS inteiro (cabeça+tronco+pernas). Continua dentro do mesmo container
+   .unit-token-inner, então as animações de transform (idle/lunge/hit-shake)
+   funcionam iguais, sem precisar de nenhum código novo pra isso. */
+.unit-sprite-img {
+  position: absolute;
+  left: 50%;
+  bottom: 2%;
+  height: 88%;
+  width: auto;
+  max-width: none;
+  transform: translateX(-50%);
+  image-rendering: pixelated;
+  filter: drop-shadow(0 2px 2px rgba(0, 0, 0, 0.5));
+  z-index: 1;
+  pointer-events: none;
+  transition:opacity .28s ease,filter .28s ease;
+}
+
+.unit-token-inner.optical-cloaked .unit-sprite-img {
+  opacity:.09;
+  filter:contrast(1.42) brightness(1.28) saturate(.38) hue-rotate(155deg) drop-shadow(1px 0 rgba(208,244,255,.42));
+  animation:optical-sprite-distort 1.9s ease-in-out infinite alternate;
+}
+
+.unit-token-inner.optical-cloaked .unit-token-icon {
+  opacity:.08;
+  filter:grayscale(.8) contrast(1.5) drop-shadow(1px 0 rgba(215,247,255,.45));
+}
+
+.unit-token-inner.visually-dazed .unit-sprite-img,
+.unit-token-inner.visually-dazed .unit-token-icon {
+  animation:stun-imbalance 1.25s ease-in-out infinite;
+}
+
+/* Espelha os frames que só existem olhando "de frente" (andar/atacar/dano/
+   morte, e o idle legado) quando a unidade está virada pra esquerda
+   (facing.dx === -1) — ver setSpriteFrame(unit, url, allowFlip) em game.js,
+   que alterna essa classe a cada frame setado. As poses paradas por direção
+   de verdade (setIdlePose/pickIdleDirectionUrl) já são arte própria por
+   lado e nunca usam essa classe. Fica na própria <img>, não no
+   .unit-token-inner, porque esse último já tem seu transform reescrito a
+   cada frame pelas animações de idle/ataque/hit (@keyframes unit-idle etc.)
+   — colocar o flip lá seria sobrescrito. */
+.unit-sprite-img.facing-left {
+  transform: translateX(-50%) scaleX(-1);
+}
+
+.unit-token-inner.has-sprite .unit-token-icon,
+.unit-token-inner.has-sprite .unit-body,
+.unit-token-inner.has-sprite .unit-legs {
+  display: none;
+}
+
+.unit-body {
+  position: absolute;
+  left: 50%;
+  bottom: 20%;
+  width: 52%;
+  height: 40%;
+  transform: translateX(-50%);
+  background: linear-gradient(
+    145deg,
+    color-mix(in srgb, var(--body-color, #666) 80%, white) 0%,
+    var(--body-color, #666) 45%,
+    color-mix(in srgb, var(--body-color, #666) 55%, black) 100%
+  );
+  border-radius: 40% 40% 32% 32% / 55% 55% 25% 25%;
+  border: 1px solid rgba(0, 0, 0, 0.4);
+  box-shadow: inset 0 2px 3px rgba(255, 255, 255, 0.2), inset 0 -3px 4px rgba(0, 0, 0, 0.3);
+}
+
+/* Braços: dois nós arredondados saindo dos lados do tronco. */
+.unit-body::before,
+.unit-body::after {
+  content: "";
+  position: absolute;
+  top: 12%;
+  width: 26%;
+  height: 62%;
+  border-radius: 50% / 40%;
+  background: linear-gradient(
+    180deg,
+    var(--body-color, #666),
+    color-mix(in srgb, var(--body-color, #666) 55%, black)
+  );
+  border: 1px solid rgba(0, 0, 0, 0.4);
+}
+
+.unit-body::before {
+  left: -16%;
+  transform: rotate(10deg);
+}
+
+.unit-body::after {
+  right: -16%;
+  transform: rotate(-10deg);
+}
+
+/* Pernas: duas pílulas lado a lado embaixo do tronco. */
+.unit-legs {
+  position: absolute;
+  left: 50%;
+  bottom: 2%;
+  width: 40%;
+  height: 22%;
+  transform: translateX(-50%);
+}
+
+.unit-legs::before,
+.unit-legs::after {
+  content: "";
+  position: absolute;
+  bottom: 0;
+  width: 40%;
+  height: 100%;
+  border-radius: 40% 40% 50% 50%;
+  background: color-mix(in srgb, var(--body-color, #666) 65%, black);
+  border: 1px solid rgba(0, 0, 0, 0.4);
+}
+
+.unit-legs::before {
+  left: 0;
+}
+
+.unit-legs::after {
+  right: 0;
+}
+
+/* Especificidade composta (não só a classe sozinha) DE PROPÓSITO: essa regra
+   precisa vencer .status-badge/.facing-arrow (que setam display: flex/etc.
+   diretamente e vêm DEPOIS no arquivo) — com a mesma especificidade, quem
+   vier por último no CSS ganha, então "hidden" nunca escondia nada de fato
+   (bug real: o contador de morte ficava visível até depois de ressuscitar). */
+.facing-arrow.hidden-arrow,
+.status-badge.hidden-badge {
+  display: none;
+}
+
+/* "Vivo" mesmo parado: leve respiração/balanço, com atraso aleatório por
+   token (ver getOrCreateUnitToken) pra ninguém balançar em sincronia. Toda
+   classe de ação abaixo (.lunge/.cast-pulse/.hit-shake) tem especificidade
+   maior e por isso substitui essa animação enquanto está tocando — quando a
+   classe é removida (ver playTransientAnimation em game.js), o idle volta
+   sozinho, sem precisar reativar nada.
+*/
+@keyframes unit-idle {
+  0%, 100% {
+    transform: translateY(0) scale(1, 1);
+  }
+  50% {
+    transform: translateY(-5%) scale(1.015, 0.985);
+  }
+}
+
+.unit-token-inner {
+  animation: unit-idle 2.4s ease-in-out infinite;
+}
+
+/* Ataque corpo a corpo em 3 estágios (recuo/preparo → golpe → retorno) em
+   vez de um lunge único — mais perto do "anticipation" clássico de sprite
+   animation (Fire Emblem etc.). */
+@keyframes unit-attack-sequence {
+  0% {
+    transform: translate(0, 0) rotate(0deg);
+  }
+  18% {
+    transform: translate(calc(var(--lunge-x) * -0.3), calc(var(--lunge-y) * -0.3)) rotate(-6deg);
+  }
+  48% {
+    transform: translate(var(--lunge-x), var(--lunge-y)) rotate(10deg);
+  }
+  68% {
+    transform: translate(calc(var(--lunge-x) * 0.5), calc(var(--lunge-y) * 0.5)) rotate(4deg);
+  }
+  100% {
+    transform: translate(0, 0) rotate(0deg);
+  }
+}
+
+.unit-token-inner.lunge {
+  animation: unit-attack-sequence 0.42s cubic-bezier(0.36, 0.07, 0.19, 0.97);
+}
+
+/* Talho (espadas): preparo maior e um arco de rotação bem mais aberto que o
+   lunge genérico — a lâmina "varre" na diagonal em vez de só avançar reto. */
+@keyframes unit-attack-slash {
+  0% {
+    transform: translate(0, 0) rotate(0deg);
+  }
+  15% {
+    transform: translate(calc(var(--lunge-x) * -0.25), calc(var(--lunge-y) * -0.25)) rotate(-18deg);
+  }
+  45% {
+    transform: translate(var(--lunge-x), var(--lunge-y)) rotate(22deg);
+  }
+  70% {
+    transform: translate(calc(var(--lunge-x) * 0.55), calc(var(--lunge-y) * 0.55)) rotate(8deg);
+  }
+  100% {
+    transform: translate(0, 0) rotate(0deg);
+  }
+}
+
+.unit-token-inner.swing-slash {
+  animation: unit-attack-slash 0.4s cubic-bezier(0.36, 0.07, 0.19, 0.97);
+}
+
+/* Estocada (adagas/punhal): quase sem rotação, mais rápida e curta que o
+   lunge genérico — um bico de escala (não giro) vende a ideia de "furar" em
+   vez de "cortar". */
+@keyframes unit-attack-stab {
+  0% {
+    transform: translate(0, 0) scale(1);
+  }
+  20% {
+    transform: translate(calc(var(--lunge-x) * -0.2), calc(var(--lunge-y) * -0.2)) scale(0.96);
+  }
+  40% {
+    transform: translate(var(--lunge-x), var(--lunge-y)) scale(1.05);
+  }
+  60% {
+    transform: translate(calc(var(--lunge-x) * 0.85), calc(var(--lunge-y) * 0.85)) scale(1.02);
+  }
+  100% {
+    transform: translate(0, 0) scale(1);
+  }
+}
+
+.unit-token-inner.swing-stab {
+  animation: unit-attack-stab 0.3s cubic-bezier(0.45, 0, 0.2, 1);
+}
+
+/* Concussão (machados, tacape, cajado): preparo mais longo e um "peso" no
+   pico (escala maior, mais rotação) antes de assentar devagar — sente mais
+   lento e pesado que os outros dois golpes. */
+@keyframes unit-attack-blunt {
+  0% {
+    transform: translate(0, 0) rotate(0deg) scale(1);
+  }
+  25% {
+    transform: translate(calc(var(--lunge-x) * -0.4), calc(var(--lunge-y) * -0.4)) rotate(-16deg) scale(1.05);
+  }
+  55% {
+    transform: translate(var(--lunge-x), var(--lunge-y)) rotate(20deg) scale(1.12);
+  }
+  78% {
+    transform: translate(calc(var(--lunge-x) * 0.6), calc(var(--lunge-y) * 0.6)) rotate(6deg) scale(1.04);
+  }
+  100% {
+    transform: translate(0, 0) rotate(0deg) scale(1);
+  }
+}
+
+.unit-token-inner.swing-blunt {
+  animation: unit-attack-blunt 0.5s cubic-bezier(0.36, 0.07, 0.19, 0.97);
+}
+
+/* Arma à distância (arco, besta, funda, arma de fogo): puxa pra trás
+   (encaixar a flecha/mirar) e solta com um pequeno solavanco de recuo pra
+   frente — bem mais sutil que o lunge corpo a corpo, já que quem atira não
+   avança até o alvo de verdade. */
+@keyframes unit-attack-draw {
+  0% {
+    transform: translate(0, 0) rotate(0deg) scale(1);
+  }
+  35% {
+    transform: translate(calc(var(--lunge-x) * -0.35), calc(var(--lunge-y) * -0.35)) rotate(-6deg) scale(0.97);
+  }
+  55% {
+    transform: translate(calc(var(--lunge-x) * 0.18), calc(var(--lunge-y) * 0.18)) rotate(3deg) scale(1.04);
+  }
+  100% {
+    transform: translate(0, 0) rotate(0deg) scale(1);
+  }
+}
+
+.unit-token-inner.draw-release {
+  animation: unit-attack-draw 0.38s cubic-bezier(0.36, 0.07, 0.19, 0.97);
+}
+
+/* Fase 2 do golpe corpo a corpo (ver spawnWeaponTrail em game.js): a ARMA
+   em si, não só o corpo do lutador, deixa um rastro cosmético entre
+   atacante e alvo. --angle vem da direção real do golpe (setado por golpe,
+   não fixo). Base comum + uma keyframe própria por família de arma. */
+.weapon-trail {
+  position: absolute;
+  transform: translate(-50%, -50%) rotate(var(--angle, 0deg));
+  pointer-events: none;
+  z-index: 10;
+}
+
+/* Talho: um arco de brilho (borda curva recortada pela metade de cima)
+   varrendo por um leque de ângulo — a "lâmina" cortando o ar. */
+.weapon-trail-slash {
+  border-radius: 50%;
+  border-top: 3px solid rgba(255, 255, 255, 0.9);
+  border-right: 1px solid rgba(255, 255, 255, 0.35);
+  clip-path: polygon(0 0, 100% 0, 100% 55%, 0 55%);
+  opacity: 0;
+  animation: weapon-trail-slash-sweep 0.26s ease-out forwards;
+}
+
+@keyframes weapon-trail-slash-sweep {
+  0% {
+    opacity: 0;
+    transform: translate(-50%, -50%) rotate(calc(var(--angle, 0deg) - 35deg)) scale(0.7);
+  }
+  35% {
+    opacity: 0.95;
+  }
+  100% {
+    opacity: 0;
+    transform: translate(-50%, -50%) rotate(calc(var(--angle, 0deg) + 35deg)) scale(1.15);
+  }
+}
+
+/* Estocada: um risco reto e curto, quase instantâneo — um brilho de lâmina
+   "furando", não cortando. */
+.weapon-trail-stab {
+  height: 12%;
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.95) 45%, transparent);
+  opacity: 0;
+  animation: weapon-trail-stab-flash 0.18s ease-out forwards;
+}
+
+@keyframes weapon-trail-stab-flash {
+  0% {
+    opacity: 0;
+    transform: translate(-50%, -50%) rotate(var(--angle, 0deg)) scaleX(0.3);
+  }
+  45% {
+    opacity: 1;
+    transform: translate(-50%, -50%) rotate(var(--angle, 0deg)) scaleX(1.15);
+  }
+  100% {
+    opacity: 0;
+    transform: translate(-50%, -50%) rotate(var(--angle, 0deg)) scaleX(1.35);
+  }
+}
+
+/* Concussão: sem "corte" nenhum — um anel de onda de choque circular no
+   ponto de impacto, mais parado (sem seguir --angle na forma, só na
+   posição), com um tom terroso em vez do branco-aço dos outros dois. */
+.weapon-trail-blunt {
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(255, 235, 200, 0.85) 0%, rgba(200, 170, 120, 0.35) 55%, transparent 75%);
+  opacity: 0;
+  animation: weapon-trail-blunt-burst 0.32s ease-out forwards;
+}
+
+/* Assinaturas visuais por classe: especializam os trails existentes sem criar
+   uma nova camada de combate. Guerreiro fica amplo e pesado; Ladino, fino e
+   quase instantâneo. */
+.weapon-trail-warrior.weapon-trail-slash {
+  border-top-width: 4px;
+  filter: drop-shadow(0 0 4px rgba(255, 208, 112, 0.85));
+}
+
+.weapon-trail-rogue.weapon-trail-stab {
+  height: 7%;
+  background: linear-gradient(90deg, transparent, rgba(231, 210, 255, 0.98) 45%, transparent);
+  animation-duration: 0.13s;
+}
+
+@keyframes weapon-trail-blunt-burst {
+  0% {
+    opacity: 0;
+    transform: translate(-50%, -50%) rotate(var(--angle, 0deg)) scale(0.3);
+  }
+  30% {
+    opacity: 0.9;
+  }
+  100% {
+    opacity: 0;
+    transform: translate(-50%, -50%) rotate(var(--angle, 0deg)) scale(1.6);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .weapon-trail-slash,
+  .weapon-trail-stab,
+  .weapon-trail-blunt {
+    display: none;
+  }
+}
+
+/* Marca de corte NO ALVO (ver spawnCutMark em game.js) — diferente do
+   weapon-trail, que é a arma passando pelo ar entre atacante e alvo; isso
+   aqui é a "ferida" que fica por uma fração de segundo. */
+.cut-mark {
+  position: absolute;
+  pointer-events: none;
+  z-index: 11;
+  opacity: 0;
+}
+
+.cut-mark-slash {
+  height: 3px;
+  background: linear-gradient(
+    90deg,
+    transparent,
+    rgba(255, 255, 255, 0.95) 15%,
+    rgba(255, 70, 70, 0.9) 50%,
+    rgba(255, 255, 255, 0.95) 85%,
+    transparent
+  );
+  box-shadow: 0 0 6px 1px rgba(255, 80, 80, 0.55);
+  animation: cut-mark-slash-flash 0.28s ease-out forwards;
+}
+
+@keyframes cut-mark-slash-flash {
+  0% {
+    opacity: 0;
+    transform: translate(-50%, -50%) rotate(var(--cut-angle, -35deg)) scaleX(0.2);
+  }
+  25% {
+    opacity: 1;
+    transform: translate(-50%, -50%) rotate(var(--cut-angle, -35deg)) scaleX(1.1);
+  }
+  100% {
+    opacity: 0;
+    transform: translate(-50%, -50%) rotate(var(--cut-angle, -35deg)) scaleX(1.35);
+  }
+}
+
+.cut-mark-stab {
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(255, 255, 255, 0.9) 0%, rgba(255, 70, 70, 0.65) 45%, transparent 72%);
+  animation: cut-mark-stab-flash 0.22s ease-out forwards;
+}
+
+@keyframes cut-mark-stab-flash {
+  0% {
+    opacity: 0;
+    transform: translate(-50%, -50%) scale(0.3);
+  }
+  30% {
+    opacity: 1;
+    transform: translate(-50%, -50%) scale(1);
+  }
+  100% {
+    opacity: 0;
+    transform: translate(-50%, -50%) scale(1.3);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .cut-mark-slash,
+  .cut-mark-stab {
+    display: none;
+  }
+}
+
+/* Conjuração em 3 estágios (encolhe reunindo energia → estica liberando →
+   assenta) em vez de um pulso único. */
+@keyframes unit-cast-sequence {
+  0% {
+    transform: scale(1) rotate(0deg);
+    filter: brightness(1);
+  }
+  28% {
+    transform: scale(0.86) rotate(-3deg);
+    filter: brightness(1);
+  }
+  58% {
+    transform: scale(1.35) rotate(2deg);
+    filter: brightness(1.4);
+  }
+  82% {
+    transform: scale(1.06) rotate(0deg);
+    filter: brightness(1.1);
+  }
+  100% {
+    transform: scale(1) rotate(0deg);
+    filter: brightness(1);
+  }
+}
+
+.unit-token-inner.cast-pulse {
+  animation: unit-cast-sequence 0.48s ease-out;
+}
+
+@keyframes unit-hit-shake {
+  0%, 100% {
+    transform: translate(0, 0) scale(1);
+    filter: none;
+  }
+  15% {
+    transform: translate(-15%, 3%) scale(0.94);
+    filter: brightness(2) drop-shadow(0 0 5px #ff5c5c);
+  }
+  35% {
+    transform: translate(12%, 0) scale(1.03);
+  }
+  55% {
+    transform: translate(-8%, 1%);
+    filter: brightness(1.3);
+  }
+  75% {
+    transform: translate(4%, 0);
+  }
+}
+
+.unit-token-inner.hit-shake {
+  animation: unit-hit-shake 0.4s ease-in-out;
+}
+
+/* Tem um pico de flash (o "último suspiro") antes de tombar — e agora
+   TOMBA em vez de sumir: pousa deitado (rotate 90°, escurecido) porque o
+   corpo fica visível no campo por mais 3 turnos (ver decayCorpses/
+   .unit-token.corpse), não desaparece mais na hora. O 100% precisa bater
+   exatamente com o estado de repouso de .unit-token.corpse — é a classe
+   que assume o visual assim que essa animação termina (ver
+   renderUnitTokens) — senão dá um "pulo" visual na troca. */
+@keyframes unit-dying {
+  0% {
+    opacity: 1;
+    transform: scale(1) rotate(0deg) translateY(0);
+    filter: brightness(1) saturate(1);
+  }
+  22% {
+    transform: scale(1.1) rotate(-4deg) translateY(-4px);
+    filter: brightness(1.7) saturate(1.3);
+  }
+  55% {
+    opacity: 0.92;
+    transform: scale(0.92) rotate(45deg) translateY(3px);
+    filter: brightness(0.85) saturate(0.4);
+  }
+  100% {
+    opacity: 0.85;
+    transform: scale(0.85) rotate(90deg) translateY(6px);
+    filter: brightness(0.5) grayscale(0.75);
+  }
+}
+
+.unit-token.dying .unit-token-inner {
+  animation: unit-dying 0.7s ease-in forwards;
+}
+
+/* Corpo caído, visível no campo até decayCorpses() o remover (3 turnos) ou
+   a Ressurreição trazer a unidade de volta. Mesmo pose final de
+   unit-dying, só que como estado de repouso (sem animação, não "some"). */
+.unit-token.corpse .unit-token-inner {
+  animation: none;
+  transform: scale(0.85) rotate(90deg) translateY(6px);
+  filter: brightness(0.5) grayscale(0.75);
+  opacity: 0.85;
+}
+
+/* Quem tem frames de morte de verdade (ver has-death-frames em
+   getOrCreateUnitToken) já mostra o personagem caído desenhado pelo
+   artista — desliga a queda/rotação de CSS pra não girar/escurecer uma arte
+   que já É a pose de "morto", senão ficava deitado E de lado ao mesmo
+   tempo. playSpriteAction (ver game.js) cuida da transição em si. */
+.unit-token.dying .unit-token-inner.has-death-frames {
+  animation: none;
+}
+
+.unit-token.corpse .unit-token-inner.has-death-frames {
+  transform: none;
+  filter: none;
+  opacity: 1;
+}
+
+.unit-token.corpse .facing-arrow {
+  display: none;
+}
+
+/* O corpo (.unit-token-inner) gira 90deg pra ficar "deitado" — sem isso o
+   badge do contador giraria junto (número de cabeça pra baixo/de lado) e o
+   jogador nunca percebia que ele tava ali. Contragira e desfaz o encolhimento
+   (1/0.85) só nele, pra ficar em pé e do tamanho normal por cima do cadáver. */
+.unit-token.corpse .unit-token-inner:not(.has-death-frames) .status-badge {
+  transform: rotate(-90deg) scale(1.176);
+}
+
+.unit-token.corpse .status-badge {
+  background: #201c30;
+  border-color: #8a7fd6;
+}
+
+/* Hit-stop: congela (sem interromper, só pausar) as animações já em
+   andamento no instante do impacto — ver hitStop() em game.js. Só pausa
+   "animation" (keyframes); "transition" (movimento de tile a tile) não tem
+   play-state, então não precisa/consegue ser pausada aqui. */
+body.hit-stop .unit-token-inner,
+body.hit-stop .projectile,
+body.hit-stop .beam-effect,
+body.hit-stop .impact-effect,
+body.hit-stop .impact-particle,
+body.hit-stop .area-burst,
+body.hit-stop .combat-vfx-accent {
+  animation-play-state: paused;
+}
+
+@keyframes board-shake-light {
+  0%, 100% {
+    transform: translate(0, 0);
+  }
+  20% {
+    transform: translate(-1.6%, 1%);
+  }
+  40% {
+    transform: translate(1.4%, -0.8%);
+  }
+  60% {
+    transform: translate(-1%, 0.8%);
+  }
+  80% {
+    transform: translate(0.8%, -0.5%);
+  }
+}
+
+/* Crítico de arma: mesmo shake de sempre, mas com um leve "zoom de câmera"
+   (scale) embutido no meio do tremor — dá a sensação de a câmera reagir ao
+   golpe, sem precisar de um sistema de câmera de verdade. */
+@keyframes board-shake-heavy {
+  0%, 100% {
+    transform: translate(0, 0) rotate(0deg) scale(1);
+  }
+  10% {
+    transform: translate(-3%, 2%) rotate(-0.6deg) scale(1.035);
+  }
+  20% {
+    transform: translate(3%, -2%) rotate(0.6deg) scale(1.045);
+  }
+  30% {
+    transform: translate(-2.6%, 1.6%) rotate(-0.4deg) scale(1.03);
+  }
+  40% {
+    transform: translate(2.6%, -1.6%) rotate(0.4deg) scale(1.02);
+  }
+  50% {
+    transform: translate(-1.8%, 1.2%) rotate(-0.3deg) scale(1.01);
+  }
+  60% {
+    transform: translate(1.8%, -1.2%) scale(1.005);
+  }
+  70% {
+    transform: translate(-1%, 0.6%);
+  }
+  80% {
+    transform: translate(1%, -0.6%);
+  }
+}
+
+.board-wrapper.shake-light {
+  animation: board-shake-light 0.3s ease-out;
+}
+
+.board-wrapper.shake-heavy {
+  animation: board-shake-heavy 0.45s ease-out;
+}
+
+/* Magias: mais lentas e "pesadas" que golpes de arma equivalentes — ver
+   HIT_STOP_MS/screenShake em game.js. Amplitude maior e um scale mais
+   sustentado (em vez do punch curto do crítico de arma) pra parecer uma
+   onda de energia, não um soco. */
+@keyframes board-shake-magic-light {
+  0%, 100% {
+    transform: translate(0, 0) scale(1);
+  }
+  15% {
+    transform: translate(-2.2%, 1.4%) scale(1.012);
+  }
+  35% {
+    transform: translate(2%, -1.2%) scale(1.018);
+  }
+  55% {
+    transform: translate(-1.6%, 1%) scale(1.01);
+  }
+  75% {
+    transform: translate(1.2%, -0.8%) scale(1.004);
+  }
+}
+
+@keyframes board-shake-magic-heavy {
+  0%, 100% {
+    transform: translate(0, 0) rotate(0deg) scale(1);
+  }
+  8% {
+    transform: translate(-3.6%, 2.4%) rotate(-0.7deg) scale(1.05);
+  }
+  18% {
+    transform: translate(3.6%, -2.4%) rotate(0.7deg) scale(1.07);
+  }
+  28% {
+    transform: translate(-3%, 2%) rotate(-0.5deg) scale(1.055);
+  }
+  38% {
+    transform: translate(3%, -2%) rotate(0.5deg) scale(1.04);
+  }
+  50% {
+    transform: translate(-2.2%, 1.4%) rotate(-0.35deg) scale(1.025);
+  }
+  62% {
+    transform: translate(2%, -1.2%) scale(1.015);
+  }
+  74% {
+    transform: translate(-1.2%, 0.8%) scale(1.006);
+  }
+  86% {
+    transform: translate(0.8%, -0.5%) scale(1.002);
+  }
+}
+
+.board-wrapper.shake-magic-light {
+  animation: board-shake-magic-light 0.42s ease-out;
+}
+
+.board-wrapper.shake-magic-heavy {
+  animation: board-shake-magic-heavy 0.62s ease-out;
+}
+
+/* Flash de tela colorido por elemento (mesma paleta dos .impact-* abaixo) —
+   filho de .board-wrapper de propósito, pra sacudir junto com o board
+   quando os dois tocam ao mesmo tempo. mix-blend-mode:screen clareia/tinge
+   em vez de cobrir a cena, então a leitura do tabuleiro não se perde. */
+.screen-flash {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 20;
+  opacity: 0;
+  mix-blend-mode: screen;
+  border-radius: 4px;
+}
+
+.screen-flash.flash-active {
+  animation: screen-flash-pulse 0.35s ease-out;
+}
+
+.screen-flash.flash-active.flash-crit {
+  animation-name: screen-flash-crit;
+  animation-duration: 0.55s;
+}
+
+@keyframes screen-flash-pulse {
+  0% {
+    opacity: 0.5;
+  }
+  100% {
+    opacity: 0;
+  }
+}
+
+@keyframes screen-flash-crit {
+  0% {
+    opacity: 0.85;
+    filter: brightness(1.5);
+  }
+  35% {
+    opacity: 0.55;
+    filter: brightness(1.15);
+  }
+  100% {
+    opacity: 0;
+    filter: brightness(1);
+  }
+}
+
+/* Partículas de impacto: um punhado de faíscas que voam pra fora do ponto
+   de acerto e somem — --dx/--dy (definidos por golpe em spawnHitParticles)
+   controlam direção/distância de cada uma. */
+.impact-particle {
+  position: absolute;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  pointer-events: none;
+  z-index: 9;
+  animation: particle-fly 0.5s ease-out forwards;
+}
+
+.impact-particle-warrior {
+  width: 6px;
+  height: 6px;
+}
+
+.impact-particle-rogue {
+  width: 3px;
+  height: 3px;
+}
+
+.impact-particle-mage {
+  border-radius: 1px;
+  transform: rotate(45deg);
+}
+
+.impact-particle-alchemist {
+  border-radius: 35% 65% 55% 45%;
+}
+
+/* Marca curta de impacto, criada em uma única div por acerto. Todas as
+   variações somem em até 420ms e ficam por cima do canvas 3D no overlay já
+   existente. */
+.combat-vfx-accent {
+  position: absolute;
+  width: 38px;
+  height: 38px;
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+  z-index: 9;
+  animation: combat-vfx-accent-out 0.52s ease-out forwards;
+}
+
+@keyframes combat-vfx-accent-out {
+  0% { opacity: 0.95; transform: translate(-50%, -50%) scale(calc(0.35 * var(--visual-scale, 1))); }
+  45% { opacity: 0.7; transform: translate(-50%, -50%) scale(calc(0.88 * var(--visual-scale, 1))); }
+  100% { opacity: 0; transform: translate(-50%, -50%) scale(calc(1.18 * var(--visual-scale, 1))); }
+}
+
+/* Cura de Todos: motes convergem pro alvo e estouram num pulso curto —
+   evento imediato, distinto da Regeneração (mais lenta/orgânica) abaixo. */
+.heal-absorb {
+  position: absolute;
+  width: 0;
+  height: 0;
+  pointer-events: none;
+  z-index: 6;
+}
+
+.heal-absorb-mote {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 6px;
+  height: 6px;
+  margin: -3px;
+  border-radius: 50%;
+  background: radial-gradient(circle, #eaffc8 0%, #8be07a 60%, transparent 100%);
+  box-shadow: 0 0 6px rgba(139, 224, 122, 0.9);
+  opacity: 0;
+  animation: heal-mote-converge 0.42s ease-in forwards;
+  animation-delay: var(--mote-delay, 0ms);
+}
+
+.heal-absorb::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 20px;
+  height: 20px;
+  margin: -10px;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(191, 255, 163, 0.85) 0%, transparent 70%);
+  opacity: 0;
+  animation: heal-pulse-ring 0.4s ease-out 0.22s forwards;
+}
+
+@keyframes heal-mote-converge {
+  0% { transform: translate(var(--dx), var(--dy)) scale(1); opacity: 0; }
+  25% { opacity: 1; }
+  100% { transform: translate(0, 0) scale(0.2); opacity: 0; }
+}
+
+@keyframes heal-pulse-ring {
+  0% { opacity: 0; transform: scale(0.3); }
+  40% { opacity: 0.9; }
+  100% { opacity: 0; transform: scale(1.6); }
+}
+
+/* Regeneração de Todos: brotos sobem devagar em vez de convergir num pulso —
+   prepara a transição pro aura contínua do status "regen". */
+.regen-apply {
+  position: absolute;
+  width: 0;
+  height: 0;
+  pointer-events: none;
+  z-index: 6;
+}
+
+.regen-apply-mote {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  width: 5px;
+  height: 5px;
+  margin-left: -2.5px;
+  border-radius: 50%;
+  background: radial-gradient(circle, #d4ffb0 0%, #6ac24a 70%, transparent 100%);
+  box-shadow: 0 0 5px rgba(106, 194, 74, 0.8);
+  opacity: 0;
+  animation: regen-mote-rise 0.6s ease-out forwards;
+  animation-delay: var(--mote-delay, 0ms);
+}
+
+.regen-apply::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: -6px;
+  width: 26px;
+  height: 26px;
+  margin: -13px;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(140, 214, 110, 0.5) 0%, transparent 75%);
+  opacity: 0;
+  animation: regen-glow-settle 0.5s ease-in 0.3s forwards;
+}
+
+@keyframes regen-mote-rise {
+  0% { transform: translate(var(--mote-x), 14px); opacity: 0; }
+  30% { opacity: 1; }
+  100% { transform: translate(var(--mote-x), -22px); opacity: 0; }
+}
+
+@keyframes regen-glow-settle {
+  0% { opacity: 0; transform: scale(0.5); }
+  50% { opacity: 0.8; }
+  100% { opacity: 0; transform: scale(1.3); }
+}
+
+/* Ressurreição: energia se forma no conjurador (cast-aura), um filete
+   dourado se conecta ao alvo (tether) e a reconstrução sobe progressivamente
+   no corpo (coluna de luz + pulso final) — ver castResurrect em game.js.
+   Tudo local por tile; sem flashScreen cobrindo o campo inteiro. */
+.resurrect-cast-aura {
+  position: absolute;
+  width: 12%;
+  height: 12%;
+  transform: translate(-50%, -50%);
+  border-radius: 50%;
+  pointer-events: none;
+  z-index: 6;
+}
+
+.resurrect-cast-aura::before,
+.resurrect-cast-aura::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  border: 2px solid rgba(255, 224, 138, 0.8);
+  box-shadow: 0 0 10px rgba(255, 224, 138, 0.6);
+  animation: resurrect-aura-spin 0.42s ease-out forwards;
+}
+
+.resurrect-cast-aura::after {
+  animation-delay: 0.08s;
+  border-color: rgba(255, 240, 200, 0.6);
+}
+
+@keyframes resurrect-aura-spin {
+  0% { transform: scale(0.2) rotate(0deg); opacity: 0; }
+  30% { opacity: 1; }
+  100% { transform: scale(1.4) rotate(200deg); opacity: 0; }
+}
+
+.resurrect-tether {
+  position: absolute;
+  height: 3px;
+  transform-origin: left center;
+  background: linear-gradient(90deg, rgba(255, 224, 138, 0.9), rgba(255, 224, 138, 0.1));
+  box-shadow: 0 0 8px rgba(255, 224, 138, 0.7);
+  pointer-events: none;
+  z-index: 6;
+  animation: resurrect-tether-fade 0.38s ease-in forwards;
+}
+
+@keyframes resurrect-tether-fade {
+  0% { opacity: 0; }
+  30% { opacity: 1; }
+  100% { opacity: 0; }
+}
+
+.resurrect-reconstruction {
+  position: absolute;
+  width: 22%;
+  height: 34%;
+  transform: translate(-50%, -70%);
+  pointer-events: none;
+  z-index: 6;
+}
+
+.resurrect-reconstruction::before {
+  content: "";
+  position: absolute;
+  left: 50%;
+  bottom: 0;
+  width: 3px;
+  height: 0%;
+  transform: translateX(-50%);
+  background: linear-gradient(0deg, rgba(255, 224, 138, 0.9), rgba(255, 255, 230, 0.9));
+  box-shadow: 0 0 14px 4px rgba(255, 224, 138, 0.8);
+  animation: resurrect-column-rise 0.5s ease-out forwards;
+}
+
+.resurrect-reconstruction::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  bottom: 10%;
+  width: 40%;
+  height: 40%;
+  transform: translate(-50%, 0) scale(0.3);
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(255, 240, 200, 0.9) 0%, transparent 70%);
+  opacity: 0;
+  animation: resurrect-climax-pulse 0.4s ease-out 0.42s forwards;
+}
+
+@keyframes resurrect-column-rise {
+  0% { height: 0%; opacity: 0; }
+  20% { opacity: 1; }
+  100% { height: 100%; opacity: 0.9; }
+}
+
+@keyframes resurrect-climax-pulse {
+  0% { opacity: 0; transform: translate(-50%, 0) scale(0.3); }
+  40% { opacity: 1; }
+  100% { opacity: 0; transform: translate(-50%, 0) scale(1.8); }
+}
+
+.combat-vfx-warrior {
+  border-radius: 50%;
+  border: 2px solid rgba(255, 214, 122, 0.9);
+  box-shadow: 0 0 10px rgba(255, 196, 86, 0.65);
+}
+
+.combat-vfx-rogue {
+  width: 42px;
+  height: 5px;
+  background: linear-gradient(90deg, transparent, rgba(235, 218, 255, 0.95), transparent);
+  animation-duration: 0.25s;
+}
+
+.combat-vfx-archer {
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  border: 2px solid rgba(216, 184, 119, 0.85);
+}
+
+.combat-vfx-mage {
+  border-radius: 50%;
+  border: 2px solid rgba(201, 163, 255, 0.9);
+  box-shadow: inset 0 0 8px rgba(201, 163, 255, 0.7), 0 0 12px rgba(201, 163, 255, 0.7);
+}
+
+.combat-vfx-alchemist {
+  border-radius: 45% 55% 60% 40%;
+  background: radial-gradient(circle, rgba(218, 255, 161, 0.9) 0%, rgba(111, 198, 91, 0.55) 45%, transparent 72%);
+}
+
+@keyframes particle-fly {
+  0% {
+    transform: translate(-50%, -50%) translate(0, 0) scale(1);
+    opacity: 1;
+  }
+  100% {
+    transform: translate(-50%, -50%) translate(var(--dx, 0), var(--dy, 0)) scale(0.25);
+    opacity: 0;
+  }
+}
+
+/* Poeira largada nos pés do token enquanto ele desliza de tile a tile (ver
+   spawnMoveTrail em game.js) — achatada e discreta, só um toque de peso no
+   passo, não um efeito chamativo. */
+.dust-puff {
+  position: absolute;
+  width: 11px;
+  height: 6px;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(222, 210, 188, 0.55) 0%, transparent 75%);
+  pointer-events: none;
+  z-index: 7;
+  transform: translate(-50%, -50%);
+  animation: dust-puff-fade 0.4s ease-out forwards;
+}
+
+@keyframes dust-puff-fade {
+  0% {
+    opacity: 0.65;
+    transform: translate(-50%, -50%) scale(0.6);
+  }
+  100% {
+    opacity: 0;
+    transform: translate(-50%, -50%) scale(1.5) translateY(3px);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .dust-puff {
+    display: none;
+  }
+}
+
+/* Cinzas subindo no momento da morte (ver spawnDeathParticles) — cor neutra
+   de propósito (não usa a paleta elemental dos impact-particle), pra
+   funcionar igual não importa a causa da morte (arma, magia, veneno...). */
+.death-particle {
+  position: absolute;
+  border-radius: 50%;
+  pointer-events: none;
+  z-index: 9;
+  background: radial-gradient(circle, rgba(200, 195, 205, 0.85) 0%, rgba(120, 115, 130, 0.4) 55%, transparent 75%);
+  animation: death-particle-drift 0.8s ease-out forwards;
+}
+
+@keyframes death-particle-drift {
+  0% {
+    transform: translate(-50%, -50%) translate(0, 0) scale(1);
+    opacity: 0.85;
+  }
+  100% {
+    transform: translate(-50%, -50%) translate(var(--dx, 0), var(--dy, 0)) scale(0.3);
+    opacity: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .death-particle {
+    display: none;
+  }
+}
+
+/* Banner de troca de turno — filho de .board-wrapper (mesmo motivo do
+   .screen-flash: sacode junto se um shake estiver rolando), centralizado
+   por cima do tabuleiro. Some sozinho: a classe "show" carrega entrada,
+   pausa e saída na mesma animação, então não precisa de um segundo timer
+   em game.js só pra tirar a classe depois. */
+.turn-banner {
+  position: absolute;
+  top: 10%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 22px;
+  border-radius: 999px;
+  background: rgba(16, 14, 26, 0.85);
+  border: 2px solid #f0c674;
+  font-weight: bold;
+  font-size: 1.05rem;
+  white-space: nowrap;
+  pointer-events: none;
+  z-index: 30;
+  opacity: 0;
+}
+
+.turn-banner.team-player {
+  border-color: #4d8dff;
+  box-shadow: 0 0 24px rgba(77, 141, 255, 0.5);
+}
+
+.turn-banner.team-enemy {
+  border-color: #ff5c5c;
+  box-shadow: 0 0 24px rgba(255, 92, 92, 0.5);
+}
+
+.turn-banner.show {
+  animation: turn-banner-cycle 1.3s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+}
+
+@keyframes turn-banner-cycle {
+  0% {
+    opacity: 0;
+    transform: translate(-50%, -50%) translateX(-36px) scale(0.9);
+  }
+  18% {
+    opacity: 1;
+    transform: translate(-50%, -50%) translateX(0) scale(1);
+  }
+  78% {
+    opacity: 1;
+    transform: translate(-50%, -50%) translateX(0) scale(1);
+  }
+  100% {
+    opacity: 0;
+    transform: translate(-50%, -50%) translateX(36px) scale(0.95);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .turn-banner.show {
+    animation: none;
+    opacity: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .unit-token {
+    transition: none;
+  }
+  .unit-token-inner {
+    animation: none;
+  }
+  .unit-token-inner.lunge,
+  .unit-token-inner.cast-pulse,
+  .unit-token-inner.hit-shake,
+  .unit-token-inner.swing-slash,
+  .unit-token-inner.swing-stab,
+  .unit-token-inner.swing-blunt,
+  .unit-token-inner.draw-release {
+    animation: none;
+  }
+  .unit-token.dying .unit-token-inner {
+    animation-duration: 0.01s;
+  }
+  .board-wrapper.shake-light,
+  .board-wrapper.shake-heavy,
+  .board-wrapper.shake-magic-light,
+  .board-wrapper.shake-magic-heavy {
+    animation: none;
+  }
+  .screen-flash.flash-active,
+  .screen-flash.flash-active.flash-crit {
+    animation: none;
+    opacity: 0;
+  }
+  .impact-particle {
+    animation: none;
+    opacity: 0;
+  }
+}
+
+.weapon-menu {
+  position: absolute;
+  transform: translate(-50%, -105%);
+  display: flex;
+  flex-direction: column;
+  width: 150px;
+  gap: 2px;
+  background: #777368;
+  border: 2px ridge #d0c9b6;
+  border-radius: 0;
+  padding: 4px;
+  pointer-events: auto;
+  z-index: 20;
+  box-shadow: 3px 4px 0 rgba(0,0,0,.5), inset 1px 1px 0 rgba(255,255,255,.28);
+}
+
+.weapon-menu .weapon-btn {
+  margin: 0;
+  padding: 3px 7px;
+}
+
+.weapon-menu.action-menu {
+  width: 132px;
+}
+
+.weapon-menu.item-menu {
+  width: 172px;
+}
+
+.floating-text {
+  position: absolute;
+  transform: translate(-50%, -50%) translate(var(--stack-x, 0px), var(--stack-y, 0px));
+  padding: 0;
+  font-family: "Palatino Linotype", "Book Antiqua", Georgia, serif;
+  font-weight: 900;
+  font-size: 1.55rem;
+  line-height: 1;
+  letter-spacing: 0.045em;
+  text-shadow: 0 2px 0 #261824, 2px 0 0 #261824, -2px 0 0 #261824, 0 -2px 0 #261824, 0 3px 5px rgba(0, 0, 0, 0.88);
+  white-space: nowrap;
+  z-index: 12;
+  animation: float-up 3.8s cubic-bezier(0.16, 0.76, 0.3, 1) forwards;
+}
+
+.floating-text.hit {
+  color: #ffe08a;
+}
+
+.floating-text.crit {
+  color: #ff5c5c;
+  font-size: 2.325rem;
+}
+
+.floating-text.miss {
+  color: #bfbfd6;
+  font-style: italic;
+}
+
+.floating-text.impact {
+  color: #ffb27a;
+  font-size: 2.1rem;
+}
+
+.floating-text.poison {
+  color: #c77dff;
+  font-weight: bold;
+}
+
+.floating-text.burn {
+  color: #ff8a3d;
+  font-weight: bold;
+}
+
+.floating-text.poison-status {
+  color: #c77dff;
+  font-style: italic;
+}
+
+.floating-text.root-status {
+  color: #8fbf6f;
+  font-style: italic;
+}
+
+.floating-text.heal {
+  color: #6fe08a;
+}
+
+.unit-name-popup {
+  position: absolute;
+  transform: translate(-50%, -125%);
+  background: #201c30;
+  border: 1px solid #8a7fd6;
+  border-radius: 8px;
+  padding: 4px 10px;
+  font-weight: bold;
+  font-size: 0.9rem;
+  white-space: nowrap;
+  z-index: 25;
+  animation: unit-name-pop 0.15s ease-out;
+}
+
+@keyframes unit-name-pop {
+  from {
+    transform: translate(-50%, -115%);
+    opacity: 0;
+  }
+  to {
+    transform: translate(-50%, -125%);
+    opacity: 1;
+  }
+}
+
+/* Marcador de status no CHÃO (não confundir com .trap-tile, que é a
+   armadilha em si) — ajuda a "ler" o campo de batalha sem precisar checar
+   o badge de cada unidade. Cada tipo usa um canto + brilho pulsante
+   diferente, então dois efeitos ao mesmo tempo no mesmo tile (raro, mas
+   possível) ainda dão pra distinguir mesmo competindo pelo mesmo
+   pseudo-elemento. */
+.tile.poisoned {
+  background: #4e5c1f !important;
+  animation: tile-poison-glow 1.6s ease-in-out infinite;
+}
+
+.tile.poisoned::after {
+  content: "☠️";
+  position: absolute;
+  bottom: 1px;
+  left: 2px;
+  font-size: 0.6rem;
+  opacity: 0.8;
+  pointer-events: none;
+}
+
+@keyframes tile-poison-glow {
+  0%, 100% {
+    box-shadow: inset 0 0 6px 1px rgba(155, 234, 87, 0.32);
+  }
+  50% {
+    box-shadow: inset 0 0 10px 3px rgba(155, 234, 87, 0.68);
+  }
+}
+
+.tile.status-rooted {
+  animation: tile-root-glow 2s ease-in-out infinite;
+}
+
+.tile.status-rooted::before {
+  content: "🌿";
+  position: absolute;
+  top: 1px;
+  left: 2px;
+  font-size: 0.6rem;
+  opacity: 0.85;
+  pointer-events: none;
+}
+
+@keyframes tile-root-glow {
+  0%, 100% {
+    box-shadow: inset 0 0 6px 1px rgba(143, 191, 111, 0.35);
+  }
+  50% {
+    box-shadow: inset 0 0 10px 3px rgba(143, 191, 111, 0.75);
+  }
+}
+
+.tile.status-paralyzed {
+  animation: tile-paralyze-glow 0.9s ease-in-out infinite;
+}
+
+.tile.status-paralyzed::before {
+  content: "💫";
+  position: absolute;
+  top: 1px;
+  right: 2px;
+  font-size: 0.6rem;
+  opacity: 0.85;
+  pointer-events: none;
+}
+
+@keyframes tile-paralyze-glow {
+  0%, 100% {
+    box-shadow: inset 0 0 6px 1px rgba(142, 198, 255, 0.35);
+  }
+  50% {
+    box-shadow: inset 0 0 12px 3px rgba(255, 255, 255, 0.85);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .tile.poisoned,
+  .tile.status-rooted,
+  .tile.status-paralyzed,
+  .tile.soul-tile {
+    animation: none;
+  }
+  .tile.soul-tile::before {
+    animation: none;
+  }
+}
+
+.tile.trap-tile {
+  background: #5a4423 !important;
+}
+
+.tile.trap-tile::after {
+  content: "🪤";
+  position: absolute;
+  bottom: 1px;
+  right: 2px;
+  font-size: 0.65rem;
+  opacity: 0.85;
+  pointer-events: none;
+}
+
+/* Alma (ver decayCorpses/applySoulPickups em game.js) — brilho pulsante +
+   um espírito flutuando bem devagar por cima. ::before (não ::after, pra
+   não brigar com o ícone da armadilha se os dois calharem no mesmo tile). */
+.tile.soul-tile {
+  animation: tile-soul-glow 1.8s ease-in-out infinite;
+}
+
+.tile.soul-tile::before {
+  content: "👻";
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  font-size: 0.9rem;
+  opacity: 0.9;
+  pointer-events: none;
+  animation: tile-soul-float 2.4s ease-in-out infinite;
+}
+
+@keyframes tile-soul-glow {
+  0%, 100% {
+    box-shadow: inset 0 0 8px 2px rgba(142, 198, 255, 0.4);
+  }
+  50% {
+    box-shadow: inset 0 0 16px 5px rgba(220, 240, 255, 0.85);
+  }
+}
+
+@keyframes tile-soul-float {
+  0%, 100% {
+    transform: translate(-50%, -50%) translateY(0);
+  }
+  50% {
+    transform: translate(-50%, -50%) translateY(-3px);
+  }
+}
+
+/* Terreno estático (árvore/água/casa) — ver terrainMap/TERRAIN_LAYOUT em
+   game.js. .terrain-icon é um <div> filho de verdade (não ::before/::after,
+   que já são usados por trap-tile/soul-tile/status acima — casa/água podem
+   ter uma unidade EM CIMA com seus próprios marcadores de status), e não a
+   própria background do .tile — assim escapa da colisão com o shorthand
+   `background` que .movable/.attackable/.current-turn/.aoe-preview usam
+   (reseta background-image pra none), garantindo que o ícone de terreno
+   nunca some quando o tile também está em destaque de movimento/ataque. */
+.tile.terrain-tree .terrain-icon,
+.tile.terrain-house .terrain-icon,
+.tile.terrain-tent .terrain-icon,
+.tile.terrain-stump .terrain-icon,
+.tile.terrain-house-rubble .terrain-icon,
+.tile.terrain-tent-rubble .terrain-icon {
+  position: absolute;
+  inset: 3px;
+  background-size: contain;
+  background-repeat: no-repeat;
+  background-position: center;
+  pointer-events: none;
+  z-index: 3;
+}
+
+/* Construções pequenas parecem assentadas no terreno, sem ampliar nem mudar
+   seus tiles lógicos. */
+.tile.terrain-house .terrain-icon,
+.tile.terrain-tent .terrain-icon {
+  filter: drop-shadow(0 4px 3px rgba(12, 20, 12, 0.62));
+}
+
+.tile.terrain-house .terrain-icon::after,
+.tile.terrain-tent .terrain-icon::after {
+  content: "";
+  position: absolute;
+  left: 13%;
+  right: 13%;
+  bottom: 2%;
+  height: 14%;
+  border-radius: 50%;
+  background: radial-gradient(ellipse, rgba(61, 42, 24, 0.56), rgba(80, 55, 29, 0.13) 58%, transparent 72%);
+  z-index: -1;
+}
+
+.tile.terrain-house .terrain-icon {
+  background-position: center bottom;
+}
+
+
+/* Galhos no chão (árvore destruída, ver damageTree) — bem menor e mais
+   discreto que os outros ícones, pra ler como "resto no chão", não como um
+   objeto novo do mesmo porte da árvore que caiu. */
+.tile.terrain-stump .terrain-icon {
+  inset: 8px;
+  z-index: 1;
+}
+
+/* Escombros (casa/tenda destruída, ver damageTree) — menos discreto que o
+   stump de árvore (era uma construção, não um graveto), mas ainda
+   claramente "resto no chão", não a construção de pé. */
+.tile.terrain-house-rubble .terrain-icon,
+.tile.terrain-tent-rubble .terrain-icon {
+  inset: 5px;
+  background-position: center bottom;
+  z-index: 1;
+}
+
+/* Água: cor cheia (não imagem — o rio do CENARIO.png é uma forma única,
+   não dá pra recortar em quadrados que emendem sem costura repetindo) com
+   opacidade reduzida de propósito, pra deixar a cor de destaque azul/
+   vermelha de movable/attackable ainda aparecer por baixo quando o tile
+   também estiver em alcance de movimento/ataque. */
+.tile.terrain-water .terrain-icon {
+  display: none;
+}
+
+.tile.terrain-water {
+  background-color: #36582e;
+  background-image:
+    radial-gradient(ellipse at 22% 31%, rgba(157, 194, 91, 0.19) 0 3%, transparent 4%),
+    radial-gradient(ellipse at 74% 68%, rgba(31, 70, 30, 0.22) 0 3%, transparent 4%);
+  background-size: 100% 100%, 100% 100%;
+  background-repeat: no-repeat;
+}
+
+.tile.terrain-water .terrain-icon::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background:
+    radial-gradient(ellipse 34% var(--bank-top-depth, 19%) at 14% 0, var(--water-bank-top, transparent) 0 52%, transparent 58%),
+    radial-gradient(ellipse 48% var(--bank-top-depth, 19%) at 63% 0, var(--water-bank-top, transparent) 0 48%, transparent 56%),
+    radial-gradient(ellipse 31% var(--bank-top-depth, 19%) at 96% 0, var(--water-bank-top, transparent) 0 54%, transparent 61%),
+    radial-gradient(ellipse 38% var(--bank-bottom-depth, 18%) at 9% 100%, var(--water-bank-bottom, transparent) 0 51%, transparent 58%),
+    radial-gradient(ellipse 52% var(--bank-bottom-depth, 18%) at 61% 100%, var(--water-bank-bottom, transparent) 0 48%, transparent 56%),
+    radial-gradient(ellipse 28% var(--bank-bottom-depth, 18%) at 98% 100%, var(--water-bank-bottom, transparent) 0 53%, transparent 60%),
+    radial-gradient(ellipse var(--bank-left-depth, 18%) 38% at 0 12%, var(--water-bank-left, transparent) 0 51%, transparent 58%),
+    radial-gradient(ellipse var(--bank-left-depth, 18%) 53% at 0 70%, var(--water-bank-left, transparent) 0 48%, transparent 56%),
+    radial-gradient(ellipse var(--bank-right-depth, 19%) 43% at 100% 18%, var(--water-bank-right, transparent) 0 51%, transparent 58%),
+    radial-gradient(ellipse var(--bank-right-depth, 19%) 51% at 100% 77%, var(--water-bank-right, transparent) 0 48%, transparent 56%);
+  filter: drop-shadow(0 1px 0 rgba(195, 225, 169, 0.28));
+}
+
+.tile.terrain-water .terrain-icon::after {
+  content: "";
+  position: absolute;
+  inset: 7% 5%;
+  pointer-events: none;
+  background:
+    radial-gradient(ellipse 29% 5% at 22% 32%, transparent 42%, rgba(218, 251, 248, 0.48) 48% 55%, transparent 62%),
+    radial-gradient(ellipse 34% 5% at 71% 69%, transparent 43%, rgba(194, 241, 244, 0.32) 49% 55%, transparent 63%),
+    radial-gradient(ellipse 18% 4% at 83% 24%, transparent 40%, rgba(222, 252, 248, 0.32) 48% 55%, transparent 64%);
+  opacity: 0.75;
+  animation: water-ripples 5.5s ease-in-out infinite alternate;
+}
+
+.tile.water-shape-1 .terrain-icon { --bank-top-depth: 17%; --bank-right-depth: 21%; --bank-bottom-depth: 19%; --bank-left-depth: 15%; }
+.tile.water-shape-2 .terrain-icon { --bank-top-depth: 22%; --bank-right-depth: 16%; --bank-bottom-depth: 15%; --bank-left-depth: 20%; }
+.tile.water-shape-3 .terrain-icon { --bank-top-depth: 15%; --bank-right-depth: 19%; --bank-bottom-depth: 22%; --bank-left-depth: 17%; }
+.tile.water-shape-4 .terrain-icon { --bank-top-depth: 20%; --bank-right-depth: 15%; --bank-bottom-depth: 17%; --bank-left-depth: 22%; }
+
+.tile.water-edge-top .terrain-icon { --water-bank-top: rgba(74, 91, 47, 0.75); }
+.tile.water-edge-right .terrain-icon { --water-bank-right: rgba(74, 91, 47, 0.75); }
+.tile.water-edge-bottom .terrain-icon { --water-bank-bottom: rgba(74, 91, 47, 0.75); }
+.tile.water-edge-left .terrain-icon { --water-bank-left: rgba(74, 91, 47, 0.75); }
+.tile.water-edge-topLeft .terrain-icon,
+.tile.water-edge-topRight .terrain-icon,
+.tile.water-edge-bottomLeft .terrain-icon,
+.tile.water-edge-bottomRight .terrain-icon { box-shadow: inset 0 0 0 1px rgba(180, 221, 189, 0.18); }
+
+/* A nascente da cachoeira já traz pedras e água no próprio sprite. Não
+   desenha a margem verde superior do rio por baixo dela. */
+.tile.waterfall-tile.terrain-water .terrain-icon {
+  --water-bank-top: transparent;
+}
+
+@keyframes water-flow {
+  from { background-position: var(--water-phase-x) var(--water-phase-y); }
+  to { background-position: calc(var(--water-phase-x) + 38px) calc(var(--water-phase-y) + 16px); }
+}
+
+@keyframes water-ripples {
+  from { transform: translate(-2%, -1%) scaleX(0.94); opacity: 0.48; }
+  to { transform: translate(3%, 2%) scaleX(1.05); opacity: 0.82; }
+}
+
+/* Cachoeira: sobreposta ao quadrado de água do topo do rio, ultrapassando
+   o tile por cima de propósito (linha 0 do tabuleiro, nada acima pra
+   cortar) — por isso não é a mesma .terrain-icon (essa fica presa a
+   inset:0 do próprio tile). */
+.waterfall-icon {
+  position: absolute;
+  left: -8%;
+  right: -8%;
+  bottom: -5%;
+  height: 220%;
+  background-size: contain;
+  background-repeat: no-repeat;
+  background-position: bottom center;
+  pointer-events: none;
+  z-index: 2;
+  filter: drop-shadow(0 3px 2px rgba(8, 28, 36, 0.38));
+}
+
+.waterfall-icon.waterfall-world-icon {
+  right: auto;
+  bottom: auto;
+  z-index: 4;
+}
+
+/* Água profunda logo atrás do splash: cobre a pequena fresta entre a base
+   pintada do PNG e o gradiente animado do rio. */
+.waterfall-icon::before {
+  content: "";
+  position: absolute;
+  left: 17%;
+  right: 17%;
+  bottom: 1%;
+  height: 18%;
+  border-radius: 48% 52% 44% 56%;
+  background: radial-gradient(ellipse at 50% 25%, rgba(104, 204, 220, 0.8), rgba(35, 119, 153, 0.68) 52%, transparent 74%);
+  z-index: -1;
+}
+
+/* Espuma de transição sobre o primeiro tile do rio. As elipses assimétricas
+   quebram o recorte reto e fazem o splash do asset se dissolver na água. */
+.waterfall-icon::after {
+  content: "";
+  position: absolute;
+  left: 5%;
+  right: 5%;
+  bottom: -7%;
+  height: 24%;
+  background:
+    radial-gradient(ellipse 38% 15% at 28% 43%, transparent 42%, rgba(218, 252, 250, 0.82) 47% 55%, transparent 62%),
+    radial-gradient(ellipse 46% 18% at 64% 55%, transparent 40%, rgba(180, 235, 240, 0.74) 47% 57%, transparent 64%),
+    radial-gradient(ellipse 25% 12% at 82% 31%, transparent 38%, rgba(229, 254, 250, 0.65) 46% 55%, transparent 64%),
+    radial-gradient(ellipse at 50% 48%, rgba(115, 205, 218, 0.42), transparent 67%);
+  animation: waterfall-foam 2.8s ease-in-out infinite alternate;
+}
+
+/* Nova lâmina animada sobre a água pintada do PNG. O movimento é vertical
+   e termina exatamente no splash/runoff, que segue na direção do SVG do
+   rio — a cachoeira deixa de parecer um adesivo parado sobre o tile. */
+.waterfall-flow {
+  position: absolute;
+  left: 37%;
+  width: 26%;
+  bottom: 12%;
+  height: 47%;
+  z-index: 3;
+  border-radius: 42% 45% 18% 20%;
+  background:
+    repeating-linear-gradient(180deg, rgba(229, 255, 252, 0.58) 0 4%, rgba(126, 211, 225, 0.2) 5% 12%, transparent 13% 21%),
+    linear-gradient(90deg, transparent, rgba(157, 226, 235, 0.34) 24%, rgba(227, 255, 252, 0.48) 49%, rgba(107, 198, 216, 0.3) 74%, transparent);
+  background-size: 100% 42%, 100% 100%;
+  mix-blend-mode: screen;
+  opacity: 0.86;
+  animation: waterfall-fall 0.72s linear infinite;
+}
+
+.waterfall-runoff {
+  position: absolute;
+  left: 20%;
+  right: 20%;
+  bottom: -3%;
+  height: 18%;
+  z-index: 4;
+  border-radius: 50%;
+  background:
+    repeating-radial-gradient(ellipse at 50% 0, transparent 0 12%, rgba(224, 255, 251, 0.62) 14% 17%, transparent 19% 29%),
+    radial-gradient(ellipse at 50% 25%, rgba(91, 188, 207, 0.66), transparent 70%);
+  animation: waterfall-runoff 1.35s ease-out infinite;
+}
+
+@keyframes waterfall-foam {
+  from { transform: translateX(-2%) scaleX(0.96); opacity: 0.72; }
+  to { transform: translateX(2%) scaleX(1.04); opacity: 1; }
+}
+
+@keyframes waterfall-fall {
+  to { background-position: 0 42%, 0 0; }
+}
+
+@keyframes waterfall-runoff {
+  0% { transform: translateY(-8%) scaleX(0.72); opacity: 0.35; }
+  45% { opacity: 0.92; }
+  100% { transform: translateY(13%) scaleX(1.14); opacity: 0; }
+}
+
+/* Flor: decoração pura sobre a grama (ver FLOWER_LAYOUT) — menor e mais
+   discreta que árvore/casa, sem nenhuma regra de jogo associada. */
+.flower-icon {
+  position: absolute;
+  inset: 6px;
+  background-size: contain;
+  background-repeat: no-repeat;
+  background-position: center bottom;
+  pointer-events: none;
+  z-index: 1;
+}
+
+.stealth-icon {
+  opacity: 0.45;
+  filter: grayscale(0.4);
+}
+
+.facing-arrow {
+  position: absolute;
+  bottom: -2px;
+  left: 50%;
+  transform: translateX(-50%);
+  font-size: 0.55rem;
+  line-height: 1;
+  color: #f0c674;
+  text-shadow: 0 0 2px rgba(0, 0, 0, 0.9);
+  pointer-events: none;
+  z-index: 4;
+}
+
+.status-badge {
+  position: absolute;
+  top: -6px;
+  right: -6px;
+  background: #201c30;
+  color: #eee;
+  border: 1px solid #c77dff;
+  border-radius: 50%;
+  width: 16px;
+  height: 16px;
+  font-size: 0.6rem;
+  line-height: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 5;
+}
+
+@keyframes float-up {
+  0% {
+    opacity: 0;
+    transform: translate(-50%, -42%) translate(var(--stack-x, 0px), var(--stack-y, 0px)) scale(0.82);
+  }
+  12% {
+    opacity: 1;
+    transform: translate(-50%, -54%) translate(var(--stack-x, 0px), var(--stack-y, 0px)) scale(1.06);
+  }
+  72% {
+    opacity: 0.9;
+  }
+  100% {
+    opacity: 0;
+    transform: translate(-50%, -50%) translate(var(--stack-x, 0px), calc(var(--stack-y, 0px) - 62px)) scale(0.96);
+  }
+}
+
+/* Aura leve e alternada dos status. Vive dentro do token persistente, então
+   acompanha movimento; fica acima da máscara frontal da água, mas abaixo
+   de impactos e números que vivem no board-overlay. */
+.status-vfx {
+  position: absolute;
+  inset: -10% -12%;
+  z-index: auto;
+  pointer-events: none;
+  transition: opacity 160ms ease;
+  border: 2px solid var(--status-color, #fff);
+  border-radius: 48%;
+  box-shadow: 0 0 9px var(--status-glow, rgba(255,255,255,.55)), inset 0 0 7px var(--status-glow, rgba(255,255,255,.28));
+  animation: status-aura-pulse 1.15s ease-in-out infinite alternate;
+}
+
+.status-vfx-glyph {
+  position: absolute;
+  left: 50%;
+  top: -14%;
+  transform: translateX(-50%);
+  color: var(--status-color, #fff);
+  font-weight: 900;
+  font-size: .72rem;
+  text-shadow: 0 1px 2px #000, 0 0 5px var(--status-color, #fff);
+  z-index: 6;
+}
+
+.status-vfx:not(.status-vfx-fire) {
+  z-index: 6;
+}
+
+.status-vfx-base { inset: 54% -17% -8%; border-radius: 50%; }
+.status-vfx-head { inset: -22% 9% 52%; border-radius: 50%; }
+.status-vfx-body { inset: -8% -11%; }
+.status-vfx-debuff { border-style: dashed; }
+.status-vfx-buff { border-style: solid; }
+.hidden-status-vfx { display: none; }
+
+.status-vfx-poison {
+  --status-color:#9bea57;
+  --status-glow:rgba(91,205,57,.5);
+  inset:-20% -22% -6%;
+  border:0;
+  border-radius:0;
+  box-shadow:none;
+  animation:poison-enter .26s ease-out both;
+  filter:drop-shadow(0 0 3px rgba(120,200,50,.28));
+}
+.status-vfx-bleed {
+  --status-color:#c83245;
+  --status-glow:rgba(151,21,45,.5);
+  inset:-20% -18% -6%;
+  border:0;
+  border-radius:0;
+  box-shadow:none;
+  animation:bleed-enter .2s ease-out both;
+  filter:none;
+}
+.status-vfx-fire {
+  --status-color:#ff8a3d;
+  --status-glow:rgba(255,88,35,.32);
+  inset:-34% -28% -10%;
+  border:0;
+  border-radius:0;
+  box-shadow:none;
+  animation:burn-enter .24s ease-out both;
+  filter:drop-shadow(0 0 4px rgba(255,91,21,.26));
+}
+
+.burn-layer,
+.burn-embers,
+.frozen-layer,
+.frozen-shards,
+.regen-layer,
+.regen-motes,
+.regen-pulse,
+.invisible-layer,
+.invisible-fragments,
+.stun-layer,
+.stun-sparks,
+.fury-layer,
+.fury-fragments,
+.fury-pulse,
+.poison-layer,
+.poison-bubbles,
+.poison-burst,
+.bleed-drops,
+.bleed-splash { display:none; }
+
+.blind-shadow,.electric-arcs,.drain-wisps,.root-layer,.drag-lines,.evasive-lines,.guarding-barrier { display:none; }
+
+.status-vfx-blinded-eyes,.status-vfx-electric-body,.status-vfx-drained,.status-vfx-rooted,
+.status-vfx-drag,.status-vfx-evasive-shift,.status-vfx-guard-barrier {
+  border:0; border-radius:0; box-shadow:none;
+}
+.status-vfx-blinded-eyes { inset:-30% -18% 46%; }
+.status-vfx-blinded-eyes .blind-shadow { display:block; position:absolute; inset:-10% -20%; clip-path:polygon(0% 38%, 100% 30%, 100% 62%, 0% 70%); background:linear-gradient(90deg, transparent 0%, rgba(20,14,26,.85) 15%, rgba(20,14,26,.9) 85%, transparent 100%); animation:blind-shadow-waver .9s ease-in-out infinite alternate; filter:drop-shadow(0 1px 1px rgba(31,20,40,.45)); }
+
+.status-vfx-electric-body { inset:-18% -18% -8%; }
+.status-vfx-electric-body .electric-arcs { display:block; position:absolute; inset:3% 8%; background:linear-gradient(118deg,transparent 0 39%,#f7ffff 41% 44%,#58d9ff 46% 49%,transparent 51%) 15% 18%/55% 37% no-repeat,linear-gradient(62deg,transparent 0 40%,#b9f7ff 42% 45%,#7989ff 47% 49%,transparent 51%) 70% 58%/46% 37% no-repeat; clip-path:polygon(0 34%,31% 0,25% 40%,55% 18%,44% 67%,100% 45%,69% 100%,20% 79%); animation:electric-discharge 1.35s steps(1,end) infinite; filter:drop-shadow(0 0 2px rgba(86,213,255,.65)); }
+.unit-token-inner.visually-paralyzed .unit-sprite-img,.unit-token-inner.visually-paralyzed .unit-token-icon { animation:electric-spasm 1.35s steps(1,end) infinite; }
+
+.status-vfx-drained { inset:-14% -18% -6%; }
+.status-vfx-drained .drain-wisps { display:block; position:absolute; inset:10% 13%; background:linear-gradient(180deg,rgba(171,161,190,.75),rgba(84,76,102,.1) 72%,transparent) 27% 28%/4% 38% no-repeat,linear-gradient(180deg,rgba(207,194,180,.58),rgba(96,83,103,.08) 75%,transparent) 69% 16%/3% 44% no-repeat,linear-gradient(180deg,rgba(142,131,158,.62),transparent) 52% 43%/3% 34% no-repeat; animation:energy-drain 1.8s ease-in infinite; }
+.unit-token-inner.visually-weakened .unit-sprite-img { filter:saturate(.86) brightness(.96); }
+
+/* Prisão de Vinhas: vinhas físicas procedurais (sem sprite externo) — brotos
+   sobem do chão, se enrolam no corpo em tensão contínua e quebram/retraem no
+   fim (ver .status-vfx-rooted-exit). VinesBackFX (root-layer-back, atrás do
+   sprite) / Character / VinesFrontFX (root-layer-front, na frente). */
+.status-vfx-rooted { inset:30% -28% -13%; border:0; box-shadow:none; }
+.status-vfx-rooted .root-layer { display:block; position:absolute; left:50%; bottom:-6%; width:120%; height:170%; transform:translateX(-50%); }
+.status-vfx-rooted .root-layer-back { z-index:0; }
+.status-vfx-rooted .root-layer-front { z-index:3; }
+
+.status-vfx-rooted .root-layer::before,
+.status-vfx-rooted .root-layer::after {
+  content:"";
+  position:absolute;
+  bottom:0;
+  width:20%;
+  height:70%;
+  border-radius:60% 40% 55% 45% / 55% 65% 35% 45%;
+  background:
+    radial-gradient(circle at 32% 22%, #b7e07f 0 9%, transparent 12%) no-repeat,
+    radial-gradient(circle at 62% 58%, #a3d46a 0 7%, transparent 10%) no-repeat,
+    linear-gradient(165deg, #365c19 0%, #6b9c33 48%, #345518 100%);
+  box-shadow: inset 0 0 4px rgba(18,36,8,.55);
+  transform-origin: bottom center;
+  transform: scaleY(0) rotate(var(--vine-rot, 0deg));
+  animation: vine-sprout .34s ease-out forwards, vine-tension 1.9s ease-in-out .34s infinite alternate;
+}
+.status-vfx-rooted .root-layer-back::before { left:10%; --vine-rot:-6deg; animation-delay:0s, .34s; }
+.status-vfx-rooted .root-layer-back::after { right:8%; height:60%; --vine-rot:9deg; animation-delay:.08s, .42s; opacity:.85; filter:brightness(.82); }
+.status-vfx-rooted .root-layer-front::before { left:28%; height:82%; --vine-rot:-10deg; animation-delay:.16s, .5s; }
+.status-vfx-rooted .root-layer-front::after { right:24%; height:66%; --vine-rot:13deg; animation-delay:.24s, .58s; }
+
+.status-vfx-rooted-exit { inset:30% -28% -13%; border:0; box-shadow:none; }
+.status-vfx-rooted-exit .root-layer::before,
+.status-vfx-rooted-exit .root-layer::after {
+  animation: vine-snap .34s ease-in forwards;
+}
+
+.status-vfx-drag { inset:52% -28% -13%; }
+.status-vfx-drag .drag-lines { display:block; position:absolute; inset:5% 0; background:linear-gradient(90deg,transparent,rgba(119,155,170,.58),transparent) 20% 55%/42% 2px no-repeat,linear-gradient(90deg,transparent,rgba(129,147,162,.42),transparent) 68% 78%/35% 2px no-repeat; animation:drag-resistance 1.5s ease-in-out infinite; }
+.unit-token-inner.visually-slowed.status-motion-active .unit-sprite-img { filter:drop-shadow(calc(var(--status-trail-x, -1) * 5px) 1px rgba(115,157,177,.32)) drop-shadow(calc(var(--status-trail-x, -1) * 9px) 2px rgba(99,127,143,.16)); }
+
+.status-vfx-evasive-shift { inset:-12% -25% -8%; }
+.status-vfx-evasive-shift .evasive-lines { display:block; position:absolute; inset:8%; background:linear-gradient(120deg,transparent 42%,rgba(220,251,255,.72) 45% 49%,transparent 52%) 5% 56%/28% 28% no-repeat,linear-gradient(60deg,transparent 42%,rgba(166,226,242,.62) 45% 49%,transparent 52%) 94% 43%/28% 28% no-repeat; animation:evasive-side-shift 1.4s steps(1,end) infinite; }
+.unit-token-inner.visually-evasive.status-motion-active .unit-sprite-img,.unit-token-inner.evasive-dodge .unit-sprite-img { filter:drop-shadow(-7px 0 rgba(204,247,255,.26)) drop-shadow(7px 0 rgba(180,226,240,.26)); }
+
+.status-vfx-guard-barrier { inset:-16% -30% -8%; }
+.status-vfx-guard-barrier .guarding-barrier { display:block; position:absolute; inset:-4% -8%; border-radius:50%; border:2px solid rgba(159,224,240,.55); background:radial-gradient(circle, rgba(159,224,240,.18) 0%, rgba(159,224,240,.05) 60%, transparent 78%); opacity:.58; animation:guard-breathe 1.7s ease-in-out infinite; filter:drop-shadow(0 0 2px rgba(159,224,240,.32)); }
+.unit-token-inner[data-status-facing="up"] .guarding-barrier { background-position:33.333% 0; }
+.unit-token-inner[data-status-facing="left"] .guarding-barrier { background-position:66.666% 0; }
+.unit-token-inner[data-status-facing="right"] .guarding-barrier { background-position:100% 0; }
+.unit-token-inner.guard-impact .guarding-barrier { background-position:0 100%; opacity:1; animation:guard-impact .36s ease-out; }
+
+/* Aura, não cobertura: fica ATRÁS do personagem (z-index negativo — o
+   sprite não tem z-index próprio, então qualquer valor negativo já basta
+   pra ficar por baixo) e mais discreta, só um brilho ao redor em vez de uma
+   camada sólida por cima cobrindo o corpo inteiro. */
+.status-vfx.status-vfx-fury-power,
+.status-vfx.status-vfx-fury-exit {
+  inset:-24% -20% -6%;
+  z-index:-1;
+  border:0;
+  border-radius:0;
+  box-shadow:none;
+  filter:drop-shadow(0 0 2px rgba(255,76,28,.3));
+}
+.status-vfx-fury-power .fury-layer,
+.status-vfx-fury-power .fury-fragments,
+.status-vfx-fury-power .fury-pulse,
+.status-vfx-fury-exit .fury-layer,
+.status-vfx-fury-exit .fury-fragments,
+.status-vfx-fury-exit .fury-pulse {
+  display:block;
+  position:absolute;
+  pointer-events:none;
+}
+.fury-layer {
+  inset:-6% -8%;
+  clip-path:polygon(50% 0%, 62% 10%, 78% 4%, 76% 20%, 92% 22%, 84% 36%, 100% 46%, 84% 56%, 92% 72%, 74% 70%, 76% 88%, 60% 78%, 50% 100%, 40% 78%, 24% 88%, 26% 70%, 8% 72%, 16% 56%, 0% 46%, 16% 36%, 8% 22%, 24% 20%, 22% 4%, 38% 10%);
+  background: radial-gradient(ellipse at 50% 50%, #ffcf6a 0%, #ff4a24 42%, #8a1010 78%, transparent 92%);
+  mix-blend-mode:screen;
+  animation:fury-flicker .3s ease-in-out infinite alternate;
+}
+.status-vfx-fury-power .fury-layer-back { z-index:0; opacity:.32; transform:scale(.91); filter:brightness(.72) saturate(1.12); }
+.status-vfx-fury-power .fury-layer-front { z-index:1; opacity:.4; clip-path:inset(43% 0 0); animation-delay:-.51s; }
+.fury-fragments {
+  z-index:2; inset:9% 8%; opacity:.65;
+  background:
+    linear-gradient(120deg,transparent 0 37%,#ff4a24 41% 55%,transparent 59%) 12% 36%/10% 7% no-repeat,
+    linear-gradient(55deg,transparent 0 36%,#ff9b2f 41% 53%,transparent 58%) 86% 52%/9% 6% no-repeat,
+    linear-gradient(145deg,transparent 0 37%,#b8172a 42% 55%,transparent 60%) 65% 87%/8% 5% no-repeat;
+  animation:fury-fragments-out 1.07s cubic-bezier(.2,.7,.3,1) infinite;
+}
+.fury-pulse { z-index:1; inset:14%; border:2px dashed rgba(255,73,31,.4); clip-path:polygon(0 15%,28% 0,40% 8%,65% 0,100% 22%,92% 46%,100% 74%,72% 100%,55% 90%,22% 100%,0 76%,8% 52%); animation:fury-pressure 2.15s ease-out infinite; }
+.status-vfx-fury-power { animation:fury-activate .34s cubic-bezier(.15,.85,.2,1.2) both; }
+.visually-furious.lunge .fury-layer-front,
+.visually-furious.swing-slash .fury-layer-front,
+.visually-furious.swing-thrust .fury-layer-front,
+.visually-furious.swing-crush .fury-layer-front { animation-duration:.42s; filter:brightness(1.35); }
+.status-vfx-fury-exit { animation:fury-exit .46s ease-out forwards; }
+.status-vfx-fury-exit .fury-layer { animation:none; }
+
+.status-vfx-stun-orbit,
+.status-vfx-stun-exit {
+  inset:-48% -28% 33%;
+  border:0;
+  border-radius:0;
+  box-shadow:none;
+  filter:drop-shadow(0 0 3px rgba(255,196,40,.45));
+}
+.status-vfx-stun-orbit .stun-layer,
+.status-vfx-stun-orbit .stun-sparks,
+.status-vfx-stun-exit .stun-layer,
+.status-vfx-stun-exit .stun-sparks {
+  display:block;
+  position:absolute;
+  pointer-events:none;
+}
+.stun-layer {
+  inset:-24% -20%;
+  border-radius:50%;
+  border:2px dashed rgba(255,196,40,.7);
+  mix-blend-mode:screen;
+  animation:stun-orbit-spin 1.15s linear infinite;
+}
+.status-vfx-stun-orbit .stun-layer-back { z-index:0; opacity:.54; filter:brightness(.85); }
+.status-vfx-stun-orbit .stun-layer-front { z-index:3; opacity:.92; animation-delay:-.46s; animation-direction:reverse; }
+.stun-sparks {
+  z-index:4;
+  inset:4% 7%;
+  background:
+    radial-gradient(circle,#fff7b0 0 19%,#ffbd28 25% 47%,transparent 53%) 12% 54%/7% 7% no-repeat,
+    radial-gradient(circle,#fffbd8 0 18%,#ff9e16 29% 50%,transparent 57%) 86% 36%/6% 6% no-repeat,
+    radial-gradient(circle,#fff1a0 0 15%,#ffb51d 28% 48%,transparent 55%) 63% 88%/5% 5% no-repeat;
+  animation:stun-sparks 1.15s ease-in-out infinite;
+}
+.status-vfx-stun-orbit { animation:stun-enter .24s cubic-bezier(.2,.9,.25,1.25) both; }
+.status-vfx-stun-exit { animation:stun-exit .43s ease-out forwards; }
+.status-vfx-stun-exit .stun-layer { animation:none; }
+
+.status-vfx-fire .burn-layer,
+.status-vfx-fire .burn-embers {
+  display:block;
+  position:absolute;
+  pointer-events:none;
+}
+
+.status-vfx-frozen {
+  --status-color:#dff8ff;
+  --status-glow:rgba(104,205,241,.24);
+  inset:-34% -28% -9%;
+  border:0;
+  border-radius:0;
+  box-shadow:none;
+  animation:none;
+  filter:drop-shadow(0 1px 2px rgba(26,82,130,.44));
+}
+
+.status-vfx-frozen .frozen-layer,
+.status-vfx-frozen .frozen-shards,
+.status-vfx-frozen-exit .frozen-layer,
+.status-vfx-frozen-exit .frozen-shards {
+  display:block;
+  position:absolute;
+  pointer-events:none;
+}
+
+.status-vfx-frozen .frozen-layer,
+.status-vfx-frozen-exit .frozen-layer {
+  left:50%;
+  bottom:0;
+  width:100%;
+  height:94%;
+  transform:translateX(-50%);
+  clip-path:polygon(50% 2%, 70% 14%, 88% 10%, 82% 32%, 96% 46%, 78% 54%, 86% 78%, 62% 70%, 58% 96%, 42% 78%, 18% 88%, 22% 60%, 4% 50%, 20% 32%, 12% 12%, 34% 16%);
+  background: radial-gradient(ellipse at 50% 40%, rgba(255,255,255,.9) 0%, #cdf3ff 26%, #7fc3ea 58%, transparent 84%);
+}
+
+.status-vfx-frozen .frozen-layer-back {
+  z-index:0;
+  opacity:.62;
+  filter:brightness(.82);
+  animation:frozen-form .38s ease-out forwards;
+}
+
+.status-vfx-frozen .frozen-layer-front {
+  z-index:2;
+  opacity:.85;
+  clip-path:inset(48% 0 0);
+  animation:frozen-form .42s ease-out forwards;
+}
+
+.status-vfx-frozen .frozen-shards {
+  z-index:3;
+  inset:22% 13% 10%;
+  opacity:.58;
+  background:
+    linear-gradient(135deg,#fff 0 18%,#9de8ff 22% 58%,transparent 62%) 14% 30%/7% 11% no-repeat,
+    linear-gradient(45deg,#eaffff 0 20%,#62bde8 25% 60%,transparent 64%) 82% 43%/6% 10% no-repeat,
+    linear-gradient(120deg,#fff 0 16%,#83d9f5 24% 57%,transparent 62%) 63% 20%/5% 8% no-repeat;
+  animation:frozen-glint 2.4s ease-in-out infinite alternate;
+}
+
+.status-vfx-frozen-exit {
+  inset:-34% -28% -9%;
+  border:0;
+  box-shadow:none;
+  animation:frozen-break .38s ease-out forwards;
+}
+
+.status-vfx-frozen-exit .frozen-layer {
+  z-index:2;
+  background-position:100% 100%;
+  opacity:.82;
+}
+
+.status-vfx-frozen-exit .frozen-shards {
+  z-index:3;
+  inset:20%;
+  background:conic-gradient(from 25deg,transparent 0 10%,#dffaff 11% 14%,transparent 15% 31%,#7ed8f4 32% 36%,transparent 37% 58%,#fff 59% 62%,transparent 63%);
+  clip-path:polygon(48% 0,56% 37%,100% 20%,66% 50%,92% 88%,58% 64%,42% 100%,43% 61%,0 80%,36% 50%,8% 18%,43% 38%);
+  animation:frozen-shards-out .38s ease-out forwards;
+}
+
+/* Aura, não cobertura: mesmo tratamento da Fúria acima — atrás do
+   personagem (z-index negativo), mais discreta, só um brilho ao redor em
+   vez de uma camada sólida cobrindo o corpo inteiro. */
+.status-vfx.status-vfx-regen-life {
+  --status-color:#9df8b8;
+  --status-glow:rgba(86,239,153,.24);
+  inset:-30% -18% -6%;
+  z-index:-1;
+  border:0;
+  border-radius:0;
+  box-shadow:none;
+  animation:regen-enter .3s ease-out both;
+  filter:drop-shadow(0 0 3px rgba(112,255,171,.25));
+}
+
+.status-vfx-regen-life .regen-layer,
+.status-vfx-regen-life .regen-motes,
+.status-vfx-regen-life .regen-pulse,
+.status-vfx-regen-exit .regen-layer,
+.status-vfx-regen-exit .regen-motes {
+  display:block;
+  position:absolute;
+  pointer-events:none;
+}
+
+.status-vfx-regen-life .regen-layer,
+.status-vfx-regen-exit .regen-layer {
+  left:50%;
+  bottom:0;
+  width:74%;
+  height:78%;
+  transform:translateX(-50%);
+  clip-path:polygon(50% 0%, 64% 14%, 80% 8%, 74% 28%, 92% 34%, 76% 48%, 88% 66%, 66% 64%, 68% 88%, 50% 100%, 32% 88%, 34% 64%, 12% 66%, 24% 48%, 8% 34%, 26% 28%, 20% 8%, 36% 14%);
+  background: radial-gradient(ellipse at 50% 45%, #f2fff0 0%, #9cf5b8 30%, #4fae74 62%, transparent 88%);
+  animation:regen-layer-pulse 1.7s ease-in-out infinite alternate;
+}
+
+.status-vfx-regen-life .regen-layer-back { z-index:0; opacity:.3; filter:brightness(.9); }
+.status-vfx-regen-life .regen-layer-front { z-index:1; opacity:.4; clip-path:inset(18% 0 0); animation-delay:-.64s; }
+
+.status-vfx-regen-life .regen-motes,
+.status-vfx-regen-exit .regen-motes {
+  z-index:3;
+  inset:18% 14% 7%;
+  background:
+    radial-gradient(circle,#f2fff0 0 16%,#76f2a4 22% 44%,transparent 50%) 15% 90%/6% 6% no-repeat,
+    radial-gradient(circle,#fffbd2 0 15%,#a9f47b 25% 48%,transparent 54%) 77% 82%/5% 5% no-repeat,
+    linear-gradient(38deg,transparent 0 34%,#83e85d 36% 62%,transparent 65%) 66% 94%/8% 7% no-repeat;
+  animation:regen-motes-absorb 1.38s cubic-bezier(.28,.62,.32,1) infinite;
+}
+
+.status-vfx-regen-life .regen-pulse {
+  z-index:4;
+  left:50%;
+  top:44%;
+  width:18%;
+  aspect-ratio:1;
+  border-radius:50%;
+  transform:translate(-50%,-50%) scale(.25);
+  background:radial-gradient(circle,#fff 0 10%,rgba(186,255,196,.85) 22%,rgba(74,228,133,.3) 48%,transparent 70%);
+  opacity:0;
+}
+
+.status-vfx-regen-life .regen-pulse.regen-pulse-active { animation:regen-heal-pulse .42s ease-out; }
+
+.status-vfx.status-vfx-regen-exit {
+  inset:-30% -18% -6%;
+  z-index:-1;
+  border:0;
+  box-shadow:none;
+  animation:regen-exit .46s ease-out forwards;
+}
+.status-vfx-regen-exit .regen-layer { opacity:.62; animation:none; }
+
+.status-vfx-optical-cloak {
+  --status-color:#e4f8ff;
+  --status-glow:rgba(194,232,244,.16);
+  inset:-38% -25% -8%;
+  border:0;
+  border-radius:0;
+  box-shadow:none;
+  animation:cloak-enter .38s ease-out both;
+  backdrop-filter:blur(.45px) contrast(1.06);
+}
+
+.status-vfx-optical-cloak .invisible-layer,
+.status-vfx-optical-cloak .invisible-fragments,
+.status-vfx-cloak-exit .invisible-layer,
+.status-vfx-cloak-exit .invisible-fragments {
+  display:block;
+  position:absolute;
+  pointer-events:none;
+}
+
+.status-vfx-optical-cloak .invisible-layer,
+.status-vfx-cloak-exit .invisible-layer {
+  left:50%;
+  bottom:0;
+  width:104%;
+  height:100%;
+  transform:translateX(-50%);
+  background: linear-gradient(115deg, transparent 0%, transparent 38%, rgba(228,248,255,.55) 46%, rgba(255,255,255,.85) 50%, rgba(228,248,255,.55) 54%, transparent 62%, transparent 100%);
+  background-size:220% 220%;
+  animation:cloak-shimmer 2.2s ease-in-out infinite;
+  mix-blend-mode:screen;
+}
+
+.status-vfx-optical-cloak .invisible-layer-back { z-index:0; opacity:.25; filter:blur(.35px); }
+.status-vfx-optical-cloak .invisible-layer-front { z-index:2; opacity:.42; animation-delay:-.83s; }
+.status-vfx-optical-cloak .invisible-fragments,
+.status-vfx-cloak-exit .invisible-fragments {
+  z-index:3;
+  inset:18% 15% 8%;
+  background:
+    linear-gradient(135deg,transparent 0 35%,rgba(223,250,255,.72) 38% 48%,transparent 52%) 14% 36%/8% 12% no-repeat,
+    linear-gradient(45deg,transparent 0 34%,rgba(176,223,243,.62) 37% 49%,transparent 53%) 84% 58%/7% 10% no-repeat,
+    linear-gradient(120deg,transparent 0 36%,rgba(255,235,195,.46) 39% 47%,transparent 51%) 63% 23%/5% 8% no-repeat;
+  animation:cloak-fragments 2.6s ease-in-out infinite alternate;
+}
+
+.status-vfx-cloak-exit {
+  inset:-38% -25% -8%;
+  border:0;
+  box-shadow:none;
+  backdrop-filter:blur(.8px) contrast(1.12);
+  animation:cloak-exit .43s ease-out forwards;
+}
+.status-vfx-cloak-exit .invisible-layer { opacity:.58; animation:none; }
+
+/* Chama real (não geometria facetada): 3 línguas de fogo orgânicas
+   empilhadas (base = maior/mais escura, ::before = média, ::after = núcleo
+   claro), cada uma com border-radius assimétrico arredondado + blur, em vez
+   de clip-path poligonal de arestas retas. Cada tongue "tremula" sozinha
+   (escala/inclinação levemente fora de fase) pra leitura de fogo de
+   verdade, não um losango pulsando. */
+.status-vfx-fire .burn-layer {
+  left:50%;
+  bottom:0;
+  width:58%;
+  height:82%;
+  transform:translateX(-50%);
+  border-radius:50% 50% 42% 42% / 62% 62% 38% 38%;
+  background: radial-gradient(ellipse at 50% 72%, #ff8a1f 0%, #d8420f 55%, #7a1a02 92%);
+  filter: blur(1.1px);
+  animation:flame-body-glow .42s ease-in-out infinite alternate;
+}
+.status-vfx-fire .burn-layer::before {
+  content:"";
+  position:absolute;
+  left:22%;
+  bottom:4%;
+  width:58%;
+  height:72%;
+  border-radius:50% 50% 40% 40% / 60% 60% 40% 40%;
+  background: radial-gradient(ellipse at 50% 64%, #ffe27a 0%, #ff8a1f 58%, transparent 92%);
+  filter: blur(.6px);
+  transform-origin: bottom center;
+  animation:flame-lick-mid .34s ease-in-out infinite alternate;
+}
+.status-vfx-fire .burn-layer::after {
+  content:"";
+  position:absolute;
+  left:36%;
+  bottom:12%;
+  width:30%;
+  height:48%;
+  border-radius:50% 50% 35% 35% / 55% 55% 45% 45%;
+  background: radial-gradient(ellipse at 50% 58%, #fff6cf 0%, #ffcf6a 62%, transparent 94%);
+  transform-origin: bottom center;
+  animation:flame-lick-core .26s ease-in-out infinite alternate;
+}
+
+.status-vfx-fire .burn-layer-back {
+  z-index:0;
+  opacity:.68;
+  filter:saturate(1.05) brightness(.92) blur(1.1px);
+}
+
+.status-vfx-fire .burn-layer-front {
+  z-index:2;
+  opacity:.82;
+  animation-duration:.32s;
+  animation-delay:-.12s;
+  filter:saturate(1.12) brightness(1.03) blur(1.1px);
+}
+
+@keyframes flame-body-glow {
+  0% { opacity:.85; filter:blur(1.1px) brightness(.94); }
+  100% { opacity:1; filter:blur(1.3px) brightness(1.1); }
+}
+@keyframes flame-lick-mid {
+  0% { transform: scaleY(.88) skewX(-3deg); }
+  100% { transform: scaleY(1.1) skewX(4deg); }
+}
+@keyframes flame-lick-core {
+  0% { transform: scaleY(.86) translateY(0) skewX(2deg); }
+  100% { transform: scaleY(1.12) translateY(-4%) skewX(-3deg); }
+}
+
+.status-vfx-fire .burn-embers {
+  z-index:3;
+  inset:18% 12% 9%;
+  background:
+    radial-gradient(circle, #fff3a0 0 12%, #ff9a22 18% 42%, transparent 48%) 17% 82%/7% 7% no-repeat,
+    radial-gradient(circle, #ffd35a 0 20%, #ef4c16 38% 55%, transparent 62%) 74% 70%/5% 5% no-repeat,
+    radial-gradient(circle, #fff4ad 0 12%, #ff6a16 35% 54%, transparent 61%) 55% 88%/4% 4% no-repeat;
+  animation:burn-embers-rise 1.18s cubic-bezier(.2,.65,.35,1) infinite;
+}
+
+/* Envenenado: toxina viscosa (não aura verde) — poça/mancha orgânica presa
+   ao corpo (poison-layer-back/front, clip-path irregular em vez de círculo),
+   bolhas que crescem e estouram em loop (poison-bubbles) e um flash de
+   bolha maior sincronizado com o tique de dano real (poison-burst, ver
+   triggerPoisonVisualTick). */
+.status-vfx-poison .poison-layer,
+.status-vfx-poison-exit .poison-layer,
+.status-vfx-poison .poison-bubbles,
+.status-vfx-poison-exit .poison-bubbles,
+.status-vfx-poison .poison-burst {
+  display:block;
+  position:absolute;
+  pointer-events:none;
+}
+
+.status-vfx-poison .poison-layer,
+.status-vfx-poison-exit .poison-layer {
+  left:50%;
+  bottom:-4%;
+  width:78%;
+  height:46%;
+  transform:translateX(-50%);
+  clip-path:polygon(50% 0%, 68% 8%, 82% 24%, 88% 46%, 78% 68%, 82% 86%, 62% 98%, 40% 94%, 18% 82%, 10% 58%, 16% 32%, 30% 12%);
+}
+.status-vfx-poison .poison-layer-back {
+  z-index:0;
+  opacity:.6;
+  background: radial-gradient(ellipse at 50% 60%, #4d6b1c 0%, #6f9524 46%, transparent 78%);
+  filter:brightness(.85);
+  animation:poison-ooze-pulse 1.6s ease-in-out infinite alternate;
+}
+.status-vfx-poison .poison-layer-front {
+  z-index:2;
+  opacity:.78;
+  background: radial-gradient(ellipse at 46% 42%, #d7f28a 0%, #9bea57 30%, #5f8a26 62%, transparent 82%);
+  animation:poison-ooze-pulse 1.9s ease-in-out .3s infinite alternate-reverse;
+}
+
+.status-vfx-poison .poison-bubbles {
+  z-index:3;
+  inset:20% 14% 18%;
+  background:
+    radial-gradient(circle, rgba(230,255,180,.95) 0 22%, rgba(139,214,64,.7) 40% 60%, transparent 68%) 22% 70%/10% 10% no-repeat,
+    radial-gradient(circle, rgba(230,255,180,.9) 0 24%, rgba(139,214,64,.65) 42% 62%, transparent 70%) 68% 40%/8% 8% no-repeat,
+    radial-gradient(circle, rgba(230,255,180,.9) 0 22%, rgba(139,214,64,.65) 40% 60%, transparent 68%) 46% 78%/6% 6% no-repeat;
+  animation:poison-bubbles-pop 2.1s ease-in-out infinite;
+}
+
+.status-vfx-poison .poison-burst {
+  z-index:4;
+  inset:18% 12% 16%;
+  border-radius:50%;
+  background: radial-gradient(circle, #f4ffd0 0 10%, #b7ef6c 24% 46%, transparent 60%);
+  opacity:0;
+}
+.status-vfx-poison .poison-burst.poison-burst-active { animation:poison-burst-pop .38s ease-out; }
+
+.status-vfx-poison-exit {
+  --status-color:#9bea57;
+  inset:-20% -22% -6%;
+  border:0;
+  box-shadow:none;
+}
+.status-vfx-poison-exit .poison-layer,
+.status-vfx-poison-exit .poison-bubbles { animation:poison-dissolve .42s ease-in forwards; }
+
+/* Sangrando: gotas físicas obedecendo gravidade (não aura/nuvem vermelha) —
+   2 gotas contínuas caindo em loop (bleed-drops, pseudo-elementos) mais um
+   respingo + 2 gotas extras sincronizados com o tique de dano real
+   (bleed-splash, ver triggerBleedVisualTick). */
+.status-vfx-bleed .bleed-drops,
+.status-vfx-bleed-exit .bleed-drops,
+.status-vfx-bleed .bleed-splash {
+  display:block;
+  position:absolute;
+  pointer-events:none;
+}
+
+.status-vfx-bleed .bleed-drops,
+.status-vfx-bleed-exit .bleed-drops { inset:0; z-index:3; }
+.status-vfx-bleed .bleed-drops::before,
+.status-vfx-bleed .bleed-drops::after,
+.status-vfx-bleed-exit .bleed-drops::before,
+.status-vfx-bleed-exit .bleed-drops::after {
+  content:"";
+  position:absolute;
+  width:5%;
+  height:7%;
+  background:#a4182f;
+  border-radius:50% 50% 50% 0;
+  box-shadow:0 1px 1px rgba(0,0,0,.35);
+}
+.status-vfx-bleed .bleed-drops::before {
+  left:38%;
+  top:34%;
+  animation:bleed-drop-fall 1.4s ease-in infinite;
+}
+.status-vfx-bleed .bleed-drops::after {
+  left:58%;
+  top:30%;
+  animation:bleed-drop-fall 1.7s ease-in .5s infinite;
+}
+.status-vfx-bleed-exit {
+  --status-color:#c83245;
+  inset:-20% -18% -6%;
+  border:0;
+  box-shadow:none;
+}
+.status-vfx-bleed-exit .bleed-drops::before,
+.status-vfx-bleed-exit .bleed-drops::after { animation:bleed-drop-fall .5s ease-in forwards; }
+
+.status-vfx-bleed .bleed-splash { inset:0; z-index:4; opacity:0; }
+.status-vfx-bleed .bleed-splash::before {
+  content:"";
+  position:absolute;
+  left:50%; top:42%;
+  width:14%; height:14%;
+  transform:translate(-50%,-50%);
+  border-radius:40% 60% 55% 45%;
+  background:radial-gradient(circle, #d43a4f 0 40%, transparent 72%);
+}
+.status-vfx-bleed .bleed-splash::after {
+  content:"";
+  position:absolute;
+  left:44%; top:56%;
+  width:4%; height:6%;
+  background:#a4182f;
+  border-radius:50% 50% 50% 0;
+  transform:rotate(35deg);
+}
+.status-vfx-bleed .bleed-splash.bleed-splash-active { animation:bleed-splash-pop .36s ease-out; }
+
+.status-vfx-roots { --status-color:#83b85a; --status-glow:rgba(76,120,47,.6); border-width:3px; border-style:double; }
+.status-vfx-electric { --status-color:#ffe66a; --status-glow:rgba(111,194,255,.72); clip-path:polygon(42% 0,72% 0,55% 36%,84% 36%,30% 100%,43% 55%,16% 55%); }
+.status-vfx-blind { --status-color:#f5edba; --status-glow:rgba(244,224,139,.54); }
+.status-vfx-slow { --status-color:#9edfff; --status-glow:rgba(96,189,232,.62); border-style:dotted; }
+.status-vfx-weak { --status-color:#9b88b3; --status-glow:rgba(108,82,135,.55); }
+.status-vfx-guard { --status-color:#80b8ff; --status-glow:rgba(70,128,220,.62); border-width:3px; }
+.status-vfx-regen,.status-vfx-regen-boost { --status-color:#68e28c; --status-glow:rgba(53,189,100,.58); }
+.status-vfx-invisible { --status-color:#d7d7ed; --status-glow:rgba(199,199,235,.45); border-style:dotted; }
+.status-vfx-evasive { --status-color:#b9ec9a; --status-glow:rgba(138,210,96,.46); }
+.status-vfx-swift { --status-color:#f5e98a; --status-glow:rgba(221,195,75,.5); }
+.status-vfx-water { --status-color:#79d8ec; --status-glow:rgba(47,151,197,.58); border-style:solid; }
+
+@keyframes status-aura-pulse { from { transform:scale(.94); filter:brightness(.92); } to { transform:scale(1.04); filter:brightness(1.18); } }
+@keyframes status-orbit { to { transform:rotate(360deg); } }
+@keyframes stun-imbalance {
+  0%,100% { rotate:-.65deg; translate:-.3px 0; }
+  50% { rotate:.75deg; translate:.4px .3px; }
+}
+@keyframes stun-enter { from { opacity:0; transform:scale(.55) rotate(-14deg); } to { opacity:1; transform:scale(1); } }
+@keyframes stun-sprite-frames {
+  0% { background-position:0 0; } 12.5% { background-position:33.333% 0; }
+  25% { background-position:66.666% 0; } 37.5% { background-position:100% 0; }
+  50% { background-position:0 100%; } 62.5% { background-position:33.333% 100%; }
+  75% { background-position:66.666% 100%; } 87.5%,100% { background-position:100% 100%; }
+}
+@keyframes stun-sparks { 0%,100% { opacity:.3; transform:scale(.75) rotate(-5deg); } 45% { opacity:1; transform:scale(1.08) rotate(4deg); } }
+@keyframes stun-exit { to { opacity:0; transform:translateY(-24%) scale(1.32) rotate(11deg); filter:blur(1px); } }
+@keyframes fury-activate { 0%{opacity:0;transform:scale(1.22)} 32%{opacity:.75;transform:scale(.72)} 46%{transform:scale(.7)} 100%{opacity:1;transform:scale(1)} }
+@keyframes fury-sprite-frames { 0%{background-position:0 0} 12.5%{background-position:33.333% 0} 25%{background-position:66.666% 0} 37.5%{background-position:100% 0} 50%{background-position:0 100%} 62.5%{background-position:33.333% 100%} 75%{background-position:66.666% 100%} 87.5%,100%{background-position:100% 100%} }
+@keyframes fury-fragments-out { 0%{opacity:0;transform:scale(.55)} 22%{opacity:1} 100%{opacity:0;transform:scale(1.34) rotate(5deg)} }
+@keyframes fury-pressure { 0%,58%{opacity:0;transform:scale(.62) rotate(-3deg)} 66%{opacity:.7} 100%{opacity:0;transform:scale(1.35) rotate(4deg)} }
+@keyframes fury-exit { 0%{opacity:1} 35%{transform:scale(.92)} 100%{opacity:0;transform:scale(1.38);filter:blur(1px)} }
+@keyframes status-sheet-8 { 0%{background-position:0 0} 12.5%{background-position:33.333% 0} 25%{background-position:66.666% 0} 37.5%{background-position:100% 0} 50%{background-position:0 100%} 62.5%{background-position:33.333% 100%} 75%{background-position:66.666% 100%} 87.5%,100%{background-position:100% 100%} }
+@keyframes electric-discharge { 0%,15%,38%,56%,80%,100%{opacity:0} 18%,27%{opacity:1;transform:translate(1px,-1px)} 59%,69%{opacity:.86;transform:scaleX(-1)} 83%,89%{opacity:.7} }
+@keyframes electric-spasm { 0%,17%,29%,57%,70%,100%{translate:0} 20%{translate:1px 0} 23%{translate:-1px 1px} 61%{translate:-1px 0} 65%{translate:1px -1px} }
+@keyframes energy-drain { 0%{opacity:0;transform:translateY(-12%) scaleY(.65)} 22%{opacity:.8} 100%{opacity:0;transform:translateY(34%) scaleY(1.15)} }
+@keyframes vine-sprout {
+  0% { transform: scaleY(0) rotate(var(--vine-rot, 0deg)); opacity: 0; }
+  40% { opacity: 1; }
+  100% { transform: scaleY(1) rotate(var(--vine-rot, 0deg)); opacity: 1; }
+}
+@keyframes vine-tension {
+  0% { transform: scaleY(1) rotate(var(--vine-rot, 0deg)); }
+  100% { transform: scaleY(1.05) rotate(calc(var(--vine-rot, 0deg) + 2deg)); }
+}
+@keyframes vine-snap {
+  0% { transform: scaleY(1) rotate(var(--vine-rot, 0deg)); opacity: 1; }
+  40% { transform: scaleY(1.08) rotate(calc(var(--vine-rot, 0deg) * -1)); opacity: 0.9; }
+  100% { transform: scaleY(0.15) rotate(calc(var(--vine-rot, 0deg) * -1)); opacity: 0; }
+}
+@keyframes fury-flicker { 0% { opacity:.85; filter:brightness(.95); } 100% { opacity:1; filter:brightness(1.15); } }
+@keyframes stun-orbit-spin { to { transform:rotate(360deg); } }
+@keyframes regen-layer-pulse { 0% { opacity:.58; filter:brightness(.92); } 100% { opacity:.82; filter:brightness(1.12); } }
+@keyframes cloak-shimmer { 0% { background-position:-40% -40%; } 100% { background-position:140% 140%; } }
+@keyframes blind-shadow-waver { 0% { opacity:.75; transform:translateY(-1%); } 100% { opacity:.95; transform:translateY(1%); } }
+@keyframes fireball-core-glow { 0% { opacity:.9; filter:blur(.4px) brightness(.95); } 100% { opacity:1; filter:blur(.6px) brightness(1.12); } }
+@keyframes fireball-lick-mid { 0% { transform: scaleY(.88) skewX(-4deg); } 100% { transform: scaleY(1.12) skewX(5deg); } }
+@keyframes fireball-lick-core { 0% { transform: scaleY(.85) skewX(3deg); } 100% { transform: scaleY(1.15) skewX(-4deg); } }
+
+@keyframes drag-resistance { 0%,100%{opacity:.25;transform:scaleX(.8)} 55%{opacity:.65;transform:scaleX(1.08)} }
+@keyframes evasive-side-shift { 0%,62%,100%{opacity:0;transform:translateX(0)} 66%{opacity:.8;transform:translateX(-5%)} 72%{opacity:0;transform:translateX(-14%)} 79%{opacity:.7;transform:translateX(5%)} 86%{opacity:0;transform:translateX(14%)} }
+@keyframes guard-breathe { from{opacity:.42;transform:scale(.98)} to{opacity:.65;transform:scale(1.015)} }
+@keyframes guard-impact { 0%{transform:scale(.96);filter:brightness(1)} 25%{transform:scale(1.08) translateX(2px);filter:brightness(1.8)} 55%{transform:scale(.99) translateX(-1px)} 100%{transform:scale(1);filter:brightness(1)} }
+@keyframes burn-enter { from { opacity:0; transform:scale(.72,.45); } to { opacity:1; transform:scale(1); } }
+@keyframes burn-sprite-frames {
+  0% { background-position:0 0; }
+  12.5% { background-position:33.333% 0; }
+  25% { background-position:66.666% 0; }
+  37.5% { background-position:100% 0; }
+  50% { background-position:0 100%; }
+  62.5% { background-position:33.333% 100%; }
+  75% { background-position:66.666% 100%; }
+  87.5%,100% { background-position:100% 100%; }
+}
+@keyframes burn-embers-rise {
+  0% { opacity:0; transform:translateY(8%) translateX(-2%) scale(.65); }
+  18% { opacity:.95; }
+  70% { opacity:.72; }
+  100% { opacity:0; transform:translateY(-58%) translateX(7%) scale(.28); }
+}
+@keyframes frozen-form {
+  0% { background-position:0 0; transform:translateX(-50%) scale(.76,.42); opacity:.35; }
+  33% { background-position:33.333% 0; }
+  66% { background-position:66.666% 0; }
+  100% { background-position:100% 0; transform:translateX(-50%) scale(1); }
+}
+@keyframes frozen-hold {
+  0% { background-position:0 100%; }
+  25% { background-position:33.333% 100%; }
+  50% { background-position:66.666% 100%; }
+  75%,100% { background-position:100% 100%; }
+}
+@keyframes frozen-glint { from { opacity:.34; filter:brightness(.92); } to { opacity:.68; filter:brightness(1.2); } }
+@keyframes frozen-break {
+  0% { opacity:1; transform:scale(1); filter:brightness(1); }
+  26% { transform:scale(1.035,.98) rotate(-1deg); filter:brightness(1.35); }
+  100% { opacity:0; transform:scale(1.18,.72) translateY(9%); filter:brightness(1.05); }
+}
+@keyframes frozen-shards-out {
+  from { opacity:.9; transform:scale(.42) rotate(0); }
+  to { opacity:0; transform:scale(1.65) rotate(16deg); }
+}
+@keyframes regen-enter { from { opacity:0; transform:scale(.78,.55); } to { opacity:1; transform:scale(1); } }
+@keyframes regen-sprite-frames {
+  0% { background-position:0 0; }
+  12.5% { background-position:33.333% 0; }
+  25% { background-position:66.666% 0; }
+  37.5% { background-position:100% 0; }
+  50% { background-position:0 100%; }
+  62.5% { background-position:33.333% 100%; }
+  75% { background-position:66.666% 100%; }
+  87.5%,100% { background-position:100% 100%; }
+}
+@keyframes regen-motes-absorb {
+  0% { opacity:0; transform:translateY(9%) translateX(-4%) scale(.65) rotate(-8deg); }
+  22% { opacity:.82; }
+  78% { opacity:.55; }
+  100% { opacity:0; transform:translateY(-52%) translateX(10%) scale(.25) rotate(24deg); }
+}
+@keyframes regen-heal-pulse {
+  0% { opacity:0; transform:translate(-50%,-50%) scale(.22); }
+  28% { opacity:.92; }
+  100% { opacity:0; transform:translate(-50%,-50%) scale(2.25); }
+}
+@keyframes regen-exit {
+  from { opacity:1; transform:translateY(0) scale(1); }
+  to { opacity:0; transform:translateY(-12%) scale(.88,1.1); }
+}
+
+@keyframes poison-enter { from { opacity:0; transform:scale(.7); } to { opacity:1; transform:scale(1); } }
+@keyframes poison-ooze-pulse { from { transform:translateX(-50%) scale(.94); } to { transform:translateX(-50%) scale(1.05); } }
+@keyframes poison-bubbles-pop {
+  0%,100% { opacity:0; transform:scale(.4); }
+  15% { opacity:.9; transform:scale(1); }
+  35% { opacity:.6; transform:scale(1.15); }
+  45% { opacity:0; transform:scale(1.3); }
+}
+@keyframes poison-burst-pop {
+  0% { opacity:0; transform:scale(.3); }
+  40% { opacity:1; transform:scale(1.2); }
+  100% { opacity:0; transform:scale(1.6); }
+}
+@keyframes poison-dissolve { from { opacity:1; } to { opacity:0; } }
+
+@keyframes bleed-enter { from { opacity:0; } to { opacity:1; } }
+@keyframes bleed-drop-fall {
+  0% { opacity:0; transform:rotate(-45deg) translateY(0) scale(.6); }
+  15% { opacity:1; transform:rotate(-45deg) translateY(0) scale(1); }
+  85% { opacity:.9; transform:rotate(-45deg) translateY(150%) scale(.85); }
+  100% { opacity:0; transform:rotate(-45deg) translateY(180%) scale(.7); }
+}
+@keyframes bleed-splash-pop {
+  0% { opacity:0; }
+  30% { opacity:1; }
+  100% { opacity:0; }
+}
+@keyframes optical-sprite-distort {
+  0% { clip-path:polygon(0 0,100% 0,100% 31%,98% 31%,98% 34%,100% 34%,100% 100%,0 100%); filter:contrast(1.38) brightness(1.2) saturate(.35) hue-rotate(155deg) drop-shadow(-1px 0 rgba(208,244,255,.34)); }
+  100% { clip-path:polygon(0 0,100% 0,100% 57%,97% 57%,97% 61%,100% 61%,100% 100%,0 100%); filter:contrast(1.5) brightness(1.36) saturate(.42) hue-rotate(165deg) drop-shadow(1px 0 rgba(208,244,255,.48)); }
+}
+@keyframes cloak-enter {
+  from { opacity:0; clip-path:inset(100% 0 0); filter:blur(1.5px); }
+  to { opacity:1; clip-path:inset(0); filter:blur(0); }
+}
+@keyframes cloak-sprite-frames {
+  0% { background-position:0 0; }
+  12.5% { background-position:33.333% 0; }
+  25% { background-position:66.666% 0; }
+  37.5% { background-position:100% 0; }
+  50% { background-position:0 100%; }
+  62.5% { background-position:33.333% 100%; }
+  75% { background-position:66.666% 100%; }
+  87.5%,100% { background-position:100% 100%; }
+}
+@keyframes cloak-fragments {
+  from { opacity:.18; transform:translate(-2%,2%) scale(.9); }
+  to { opacity:.52; transform:translate(3%,-5%) scale(1.06); }
+}
+@keyframes cloak-exit {
+  0% { opacity:.32; transform:scale(.98); filter:blur(.3px); }
+  35% { opacity:.82; transform:scale(1.035); filter:blur(1px) brightness(1.35); }
+  100% { opacity:0; transform:scale(1.12); filter:blur(2px); }
+}
+
+.tile {
+  background-color: #36582e;
+  background-image:
+    radial-gradient(ellipse at 22% 31%, rgba(157, 194, 91, 0.19) 0 3%, transparent 4%),
+    radial-gradient(ellipse at 74% 68%, rgba(31, 70, 30, 0.22) 0 3%, transparent 4%);
+  background-size: 100% 100%, 100% 100%;
+  background-repeat: no-repeat;
+  image-rendering: pixelated;
+  border-radius: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+  cursor: default;
+  font-size: 1.1rem;
+  /* Bisel sutil — luz vindo de cima/esquerda, sombra embaixo/direita — pra
+     cada quadrado parecer levemente em relevo na superfície inclinada. */
+  box-shadow: inset 0 0 0 1px rgba(20, 43, 23, 0.16);
+}
+
+.tile.grass-2 { background-position: 5% 12%, 88% 34%; }
+.tile.grass-3 { background-position: 78% 18%, 20% 82%; }
+.tile.grass-4 { background-position: 34% 72%, 72% 24%; }
+
+.tile.movable {
+  background: #3d5a7a;
+  cursor: pointer;
+}
+
+.tile.movable:hover {
+  background: #4d76a3;
+}
+
+.tile.attackable {
+  background: #7a3d3d;
+  cursor: crosshair;
+}
+
+.tile.attackable:hover {
+  background: #a34d4d;
+}
+
+.tile.telegraph {
+  animation: telegraph-pulse 0.5s ease-in-out infinite alternate;
+}
+
+@keyframes telegraph-pulse {
+  from {
+    background: #7a4a1a;
+  }
+  to {
+    background: #ffa94d;
+  }
+}
+
+.tile.aoe-preview {
+  background: #6f3da3;
+  box-shadow: inset 0 0 0 2px #c77dff;
+}
+
+.tile.aoe-preview:hover {
+  background: #8a4fc7;
+}
+
+/* Faixas cardeais (Destruição Rastejante, Tacar Tronco): área bem maior que
+   um raio de explosão normal, então usa uma cor/textura própria (listrada,
+   tom âmbar) em vez do roxo redondo de sempre, pra não parecer a mesma
+   coisa numa escala errada. */
+.tile.aoe-preview-band {
+  background: repeating-linear-gradient(
+    135deg,
+    #a35a1a,
+    #a35a1a 6px,
+    #c97a2e 6px,
+    #c97a2e 12px
+  );
+  box-shadow: inset 0 0 0 2px #ffb15c;
+}
+
+.tile.aoe-preview-band:hover {
+  background: repeating-linear-gradient(
+    135deg,
+    #c97a2e,
+    #c97a2e 6px,
+    #e6953f 6px,
+    #e6953f 12px
+  );
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .tile.aoe-preview-band {
+    animation: band-preview-shift 0.9s linear infinite;
+  }
+}
+
+@keyframes band-preview-shift {
+  from {
+    background-position: 0 0;
+  }
+  to {
+    background-position: 34px 0;
+  }
+}
+
+.tile.current-turn {
+  background: #6b5a2a;
+  box-shadow: 0 0 8px 2px rgba(240, 198, 116, 0.6);
+  transition: background 0.3s ease;
+}
+
+.tile.selected {
+  outline: 2px solid #f0c674;
+  outline-offset: -2px;
+}
+
+.log-panel {
+  margin-top: 14px;
+  background: #201c30;
+  border: 2px solid var(--panel-border);
+  border-radius: 0;
+  box-shadow: var(--pixel-bevel);
+  padding: 10px 14px;
+  max-height: 140px;
+  overflow-y: auto;
+}
+
+.log-panel h3 {
+  margin: 0 0 6px 0;
+  font-family: var(--console-font);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  font-size: 0.85rem;
+  color: var(--panel-gold);
+}
+
+#log {
+  font-size: 0.8rem;
+  line-height: 1.5;
+}
+
+.log-entry {
+  display: flex;
+  align-items: baseline;
+  gap: 5px;
+  animation: log-entry-in 0.2s ease-out;
+}
+
+@keyframes log-entry-in {
+  from {
+    opacity: 0;
+    transform: translateX(-4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+.log-icon {
+  flex: none;
+  font-size: 0.85em;
+}
+
+/* Cor por time primeiro (pista fraca, só quem falou) — os tipos de evento
+   abaixo pisam por cima dela quando a mensagem é notável o bastante pra
+   merecer cor própria (crítico, derrota, cura...). */
+.log-entry.log-team-player .log-text {
+  color: #9fc9ff;
+}
+
+.log-entry.log-team-enemy .log-text {
+  color: #ff9c9c;
+}
+
+.log-entry.log-type-crit .log-text {
+  color: #ff5c5c;
+  font-weight: bold;
+}
+
+.log-entry.log-type-death .log-text {
+  color: #ffb27a;
+  font-weight: bold;
+}
+
+.log-entry.log-type-heal .log-text {
+  color: #6fe08a;
+}
+
+.log-entry.log-type-status .log-text {
+  color: #c77dff;
+}
+
+.log-entry.log-type-miss .log-text {
+  color: #bfbfd6;
+  font-style: italic;
+}
+
+.log-entry.log-type-turn .log-text {
+  color: #f0c674;
+  font-weight: bold;
+}
+
+.witch-tint {
+  display: inline-block;
+  filter: hue-rotate(90deg) saturate(2.2) brightness(0.95);
+}
+
+.impact-effect {
+  position: absolute;
+  border-radius: 4px;
+  pointer-events: none;
+  z-index: 8;
+  animation: impact-flash 0.4s ease-out forwards;
+}
+
+@keyframes impact-flash {
+  0% {
+    opacity: 0.9;
+    transform: scale(0.6);
+  }
+  60% {
+    opacity: 0.6;
+    transform: scale(1.15);
+  }
+  100% {
+    opacity: 0;
+    transform: scale(1.3);
+  }
+}
+
+.impact-melee {
+  background: radial-gradient(circle, #ffe08a 0%, transparent 70%);
+}
+
+.impact-ranged {
+  background: radial-gradient(circle, #8ec6ff 0%, transparent 70%);
+}
+
+.impact-fire {
+  background: radial-gradient(circle, #ff8a3d 0%, transparent 70%);
+}
+
+.impact-arcane {
+  background: radial-gradient(circle, #c9a3ff 0%, transparent 70%);
+}
+
+.impact-lightning {
+  background: radial-gradient(circle, #fff27a 0%, transparent 70%);
+}
+
+.impact-heal {
+  background: radial-gradient(circle, #6fe08a 0%, transparent 70%);
+}
+
+.impact-poison {
+  background: radial-gradient(circle, #c77dff 0%, transparent 70%);
+}
+
+.impact-nature {
+  background: radial-gradient(circle, #8fbf6f 0%, transparent 70%);
+}
+
+.impact-freeze {
+  background: radial-gradient(circle, #bfe9ff 0%, transparent 70%);
+}
+
+/* Destruição Rastejante (Xamã): roxo-acinzentado, bem diferente do verde de
+   .impact-nature — usado em spawnConeSweep pra "rastejar" tile a tile até
+   a borda do tabuleiro em vez de piscar tudo de uma vez. */
+.impact-web {
+  background: radial-gradient(circle, #d9d3ff 0%, #6b5b95 55%, transparent 78%);
+}
+
+/* --- Projéteis: flecha, orbe, faísca etc. viajando de um tile a outro
+   (ver spawnProjectile em game.js). O ângulo de viagem vem de --angle;
+   glifos que representam "algo apontando" (flecha, bala, lâmina) nascem
+   virados pra direita (0deg) e giram a partir daí. */
+.projectile {
+  position: absolute;
+  transform: translate(-50%, -50%) rotate(var(--angle, 0deg)) scale(var(--visual-scale, 1));
+  transition: left linear, top linear;
+  pointer-events: none;
+  z-index: 9;
+  font-size: 1rem;
+  line-height: 1;
+  will-change: left, top;
+}
+
+.projectile::before {
+  display: block;
+}
+
+.projectile-bolt::before,
+.projectile-blade::before {
+  content: "➤";
+}
+
+/* Flecha Normal (Arqueiro): protagonista física — ponta, haste e penas
+   reconhecíveis (madeira/metal, sem magia/glow), não o glifo genérico "➤"
+   compartilhado com virote/lâmina. A base é a haste; ::before é a ponta
+   triangular na direção do voo (a rotação real vem de --angle no .projectile
+   pai — aqui só desenha apontando "pra frente" no referencial local). */
+.projectile-arrow {
+  width: 20px;
+  height: 2px;
+  background: linear-gradient(90deg, #8a6a3d 10%, #c9a066 90%);
+  border-radius: 1px;
+  box-shadow: 0 0 1px rgba(0, 0, 0, 0.5);
+}
+.projectile-arrow::before {
+  content: "";
+  position: absolute;
+  right: -6px;
+  top: 50%;
+  width: 0;
+  height: 0;
+  border-top: 3px solid transparent;
+  border-bottom: 3px solid transparent;
+  border-left: 7px solid #e2c28a;
+  transform: translateY(-50%);
+}
+
+/* A trajetória já era controlada por left/top; estes refinamentos só tornam
+   a origem e a leitura de cada classe mais explícitas. */
+.projectile-archer.projectile-arrow::after {
+  content: "";
+  position: absolute;
+  right: 70%;
+  top: 50%;
+  width: 28px;
+  height: 3px;
+  transform: translateY(-50%);
+  background: linear-gradient(90deg, transparent, rgba(216, 184, 119, 0.8));
+}
+
+/* Mesma flecha física de sempre (haste real, não glifo) — só a ponta em
+   chamas, ver item 14. */
+.projectile-fire-arrow {
+  isolation: isolate;
+  width: 20px;
+  height: 2px;
+  background: linear-gradient(90deg, #8a6a3d 10%, #c9a066 90%);
+  border-radius: 1px;
+  box-shadow: 0 0 1px rgba(0, 0, 0, 0.5);
+}
+
+.projectile-fire-arrow::before {
+  content: "";
+  display: block;
+  position: absolute;
+  right: -6px;
+  top: 50%;
+  width: 0;
+  height: 0;
+  border-top: 3px solid transparent;
+  border-bottom: 3px solid transparent;
+  border-left: 7px solid #ffb347;
+  filter: drop-shadow(0 0 3px #ff6a1c) drop-shadow(0 0 6px rgba(255, 106, 28, 0.7));
+  transform: translateY(-50%);
+  z-index: 2;
+}
+
+.projectile-fire-arrow::after {
+  content: "";
+  position: absolute;
+  right: 55%;
+  top: 50%;
+  width: 22px;
+  height: 8px;
+  transform: translateY(-50%);
+  border-radius: 60% 15% 15% 60%;
+  background: linear-gradient(90deg, transparent 0%, rgba(203, 36, 8, 0.5) 30%, rgba(255, 138, 28, 0.85) 75%, transparent 100%);
+  filter: drop-shadow(0 0 2px #ff6a1c);
+  animation: fireball-trail-flicker 0.16s ease-in-out infinite alternate;
+  z-index: 1;
+}
+
+.projectile-alchemist.projectile-fireball {
+  background: radial-gradient(circle, #efffb8 0%, #8bcf55 52%, transparent 80%);
+  box-shadow: 0 0 14px 4px rgba(139, 207, 85, 0.75);
+}
+
+.projectile-flask {
+  width: 14px;
+  height: 18px;
+  border: 2px solid #ecffd5;
+  border-radius: 3px 3px 6px 6px;
+  background: linear-gradient(180deg, transparent 0 35%, #80d765 36%);
+  box-shadow: 0 0 8px rgba(128, 215, 101, 0.75);
+}
+
+.projectile-bolt::before {
+  color: #b8c2cc;
+}
+
+.projectile-blade::before {
+  content: "🗡️";
+  display: inline-block;
+  animation: projectile-spin 0.25s linear infinite;
+}
+
+/* Bomba (Químico): recipiente físico girando em voo, com reagente
+   borbulhante visível e um pavio curto — não uma bola de fogo com frasco.
+   Ver .area-burst-bomb pra detonação (item 21). */
+.projectile-bomb::before {
+  content: "";
+  display: block;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background:
+    radial-gradient(circle, #d7f28a 0 30%, transparent 62%) 30% 66%/24% 24% no-repeat,
+    radial-gradient(circle, #d7f28a 0 30%, transparent 62%) 66% 40%/18% 18% no-repeat,
+    radial-gradient(circle at 35% 32%, #6b7a5a 0%, #3c4a30 55%, #1c2413 88%);
+  border: 1px solid #131a0d;
+  box-shadow: 0 0 5px rgba(0, 0, 0, 0.5), inset -2px -2px 3px rgba(0, 0, 0, 0.35);
+  animation: bomb-spin 0.5s linear infinite;
+}
+.projectile-bomb::after {
+  content: "";
+  position: absolute;
+  left: 42%;
+  top: -22%;
+  width: 2px;
+  height: 8px;
+  border-radius: 1px;
+  background: #8a6a3d;
+  box-shadow: 0 -2px 3px rgba(255, 180, 60, 0.8);
+}
+@keyframes bomb-spin { to { transform: rotate(360deg); } }
+
+.projectile-stone {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #9a9a9a;
+  box-shadow: 0 0 4px 1px rgba(0, 0, 0, 0.5);
+}
+
+.projectile-spark {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: radial-gradient(circle, #fff7c2 0%, #ffe08a 55%, transparent 80%);
+  box-shadow: 0 0 8px 2px rgba(255, 224, 138, 0.8);
+}
+
+/* Tiro Normal (Químico): bala/dardo metálico físico, não esfera luminosa —
+   item 25. Streak curto atrás (::after), nunca vira laser. */
+.projectile-bullet {
+  width: 9px;
+  height: 3px;
+  border-radius: 1px 3px 3px 1px;
+  background: linear-gradient(90deg, #7a7a7a 0%, #d8d8d8 55%, #fff6c9 100%);
+  box-shadow: 0 0 2px rgba(0, 0, 0, 0.5);
+}
+.projectile-bullet::after {
+  content: "";
+  position: absolute;
+  right: 100%;
+  top: 50%;
+  width: 8px;
+  height: 1px;
+  transform: translateY(-50%);
+  background: linear-gradient(90deg, transparent, rgba(255, 214, 138, 0.6));
+}
+
+/* Tiro Explosivo (Químico): munição física com núcleo quente + rastro
+   curto, distinta da bala comum acima — a detonação de verdade fica em
+   .area-burst-explosive-shot, disparada só no impacto (item 22). */
+.projectile-bullet-explosive {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: radial-gradient(circle, #fff6c9 0%, #ffb347 45%, #d9401a 78%, transparent 100%);
+  box-shadow: 0 0 8px 3px rgba(255, 138, 45, 0.85);
+}
+.projectile-bullet-explosive::after {
+  content: "";
+  position: absolute;
+  right: 60%;
+  top: 50%;
+  width: 16px;
+  height: 2px;
+  transform: translateY(-50%);
+  background: linear-gradient(90deg, transparent, rgba(255, 179, 71, 0.85));
+}
+
+/* Míssil Mágico (Maga): núcleo estruturado + fragmentos geométricos
+   orbitando (filhos reais, ver spawnProjectile em game.js) — não uma
+   bolinha roxa/orb com trail (REGRA PRINCIPAL do redesign, item 27). */
+.projectile-missile {
+  isolation: isolate;
+  width: 10px;
+  height: 10px;
+}
+.missile-core {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 8px;
+  height: 8px;
+  transform: translate(-50%, -50%) rotate(45deg);
+  background: linear-gradient(135deg, #ffffff 0%, #c9a3ff 55%, #6a4fd8 100%);
+  box-shadow: 0 0 6px rgba(201, 163, 255, 0.85);
+  z-index: 2;
+}
+.missile-fragment {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 3px;
+  height: 3px;
+  background: linear-gradient(135deg, #e8d9ff, #a37bff);
+  animation: missile-fragment-orbit 0.5s linear infinite;
+  animation-delay: var(--frag-delay, 0ms);
+  z-index: 1;
+}
+@keyframes missile-fragment-orbit {
+  0% { transform: rotate(var(--frag-angle, 0deg)) translateX(9px) rotate(calc(var(--frag-angle, 0deg) * -1)); }
+  100% { transform: rotate(calc(var(--frag-angle, 0deg) + 360deg)) translateX(9px) rotate(calc((var(--frag-angle, 0deg) + 360deg) * -1)); }
+}
+.projectile-missile::after {
+  content: "";
+  position: absolute;
+  right: 70%;
+  top: 50%;
+  width: 20px;
+  height: 1px;
+  transform: translateY(-50%);
+  background: linear-gradient(90deg, transparent, rgba(163, 123, 255, 0.6));
+}
+
+.projectile-fireball {
+  width: 46px;
+  height: 46px;
+  isolation: isolate;
+}
+
+/* Núcleo quente: forma de chama irregular (não um círculo), plantada perto
+   da borda de ataque onde a arte pintada tem o miolo branco/amarelo, então a
+   silhueta continua lendo como fogo mesmo se o box-shadow/glow for removido.
+   É filha própria (não pseudo-elemento do projétil) de propósito: clip-path
+   recorta tudo dentro do próprio elemento, e as brasas do rastro
+   (fireball-trail-ember) precisam escapar da caixa de 46px sem serem
+   cortadas junto. */
+/* Chama real (não geometria facetada): mesma técnica de 3 línguas orgânicas
+   do status Queimando (.status-vfx-fire .burn-layer) — border-radius
+   assimétrico + blur, sem clip-path poligonal. */
+.fireball-core {
+  position: absolute;
+  left: 60%;
+  top: 50%;
+  width: 58%;
+  height: 62%;
+  transform: translate(-50%, -50%);
+  border-radius: 50% 50% 45% 45% / 62% 62% 38% 38%;
+  background: radial-gradient(ellipse at 50% 70%, #ff8a1f 0%, #d8420f 55%, rgba(122, 26, 2, 0.85) 90%);
+  filter: blur(0.8px);
+  box-shadow: 0 0 8px 2px rgba(255, 110, 24, 0.38);
+  animation: fireball-core-glow 210ms ease-in-out infinite alternate;
+  z-index: 0;
+}
+.fireball-core::before {
+  content: "";
+  position: absolute;
+  left: 24%;
+  bottom: 4%;
+  width: 56%;
+  height: 70%;
+  border-radius: 50% 50% 40% 40% / 60% 60% 40% 40%;
+  background: radial-gradient(ellipse at 50% 62%, #ffd94e 0%, #ff8a1f 58%, transparent 92%);
+  transform-origin: bottom center;
+  animation: fireball-lick-mid 260ms ease-in-out infinite alternate;
+}
+.fireball-core::after {
+  content: "";
+  position: absolute;
+  left: 36%;
+  bottom: 12%;
+  width: 30%;
+  height: 46%;
+  border-radius: 50% 50% 35% 35% / 55% 55% 45% 45%;
+  background: radial-gradient(ellipse at 50% 56%, #fffde0 0%, #ffcf6a 60%, transparent 94%);
+  transform-origin: bottom center;
+  animation: fireball-lick-core 190ms ease-in-out infinite alternate;
+}
+
+/* Segunda camada de chama (leve deslocamento/atraso), pra dar volume sem
+   virar uma silhueta faceteada — mesmo princípio de burn-layer-front. */
+.projectile-fireball::before {
+  content: "";
+  position: absolute;
+  left: 48%;
+  top: 52%;
+  width: 44%;
+  height: 48%;
+  transform: translate(-50%, -50%);
+  border-radius: 50% 50% 42% 42% / 60% 60% 40% 40%;
+  background: radial-gradient(ellipse at 50% 66%, #fff6c9 0%, #ffb347 46%, rgba(180, 24, 6, 0.65) 82%, transparent 96%);
+  filter: blur(0.7px) saturate(1.1);
+  animation: fireball-core-glow 240ms ease-in-out infinite alternate-reverse;
+  z-index: 1;
+}
+
+/* Trail curto e brasas: permanece muito menor que a chama pintada para o
+   efeito não voltar a parecer uma coleção de partículas. */
+.projectile-fireball::after {
+  content: "";
+  position: absolute;
+  right: 65%;
+  top: 50%;
+  width: 36px;
+  height: 12px;
+  transform: translateY(-50%);
+  border-radius: 60% 12% 12% 60%;
+  background:
+    radial-gradient(circle at 12% 25%, #ffd45a 0 5%, transparent 8%),
+    radial-gradient(circle at 30% 75%, #ff6b1e 0 5%, transparent 9%),
+    linear-gradient(90deg, transparent 0%, rgba(203, 36, 8, 0.56) 28%, rgba(255, 133, 28, 0.84) 72%, transparent 100%);
+  filter: drop-shadow(0 0 2px #ff6a1c);
+  animation: fireball-trail-flicker 180ms ease-in-out infinite alternate;
+  z-index: 0;
+}
+
+@keyframes fireball-sprite-frames {
+  0%, 16.65% { background-position: 0% 0; }
+  16.66%, 33.31% { background-position: 20% 0; }
+  33.32%, 49.97% { background-position: 40% 0; }
+  49.98%, 66.63% { background-position: 60% 0; }
+  66.64%, 83.29% { background-position: 80% 0; }
+  83.30%, 100% { background-position: 100% 0; }
+}
+
+@keyframes fireball-trail-flicker {
+  from { opacity: 0.58; transform: translateY(-50%) scaleX(0.78) scaleY(0.72); }
+  to { opacity: 0.92; transform: translateY(-50%) scaleX(1.08) scaleY(1.18); }
+}
+
+/* Brasas soltando do voo (ver spawnProjectile): pequenas faíscas nascendo
+   perto da cauda da bola e se desprendendo pra trás, em loop, dando leitura
+   de combustão em movimento além do rastro colado ao corpo. */
+.fireball-trail-ember {
+  position: absolute;
+  left: 28%;
+  top: 50%;
+  width: 3px;
+  height: 3px;
+  border-radius: 50% 40% 55% 45%;
+  background: #ffcf5e;
+  box-shadow: 0 0 4px #ff6a1c;
+  opacity: 0;
+  animation: fireball-trail-ember-fly 520ms ease-out var(--ember-delay, 0ms) infinite;
+}
+
+@keyframes fireball-trail-ember-fly {
+  0% { opacity: 0; transform: translate(-50%, -50%) scale(1); }
+  10% { opacity: 0.95; }
+  100% {
+    opacity: 0;
+    transform: translate(calc(-50% + var(--ember-dx, -30px)), calc(-50% + var(--ember-dy, 10px))) scale(0.25);
+  }
+}
+
+.projectile-frost {
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: radial-gradient(circle, #ffffff 0%, #8ec6ff 55%, transparent 80%);
+  box-shadow: 0 0 14px 4px rgba(142, 198, 255, 0.8);
+  animation: projectile-pulse 0.2s ease-in-out infinite alternate;
+}
+
+/* Explosão Sonora (Fada): pressão sonora e reverberação — ondas irregulares
+   se expandem/sobrepõem em vez de um anel perfeito só piscando (pedido
+   explícito: nada de círculo perfeito demais). Sem fogo/fumaça, sem
+   preenchimento sólido. */
+.projectile-soundwave {
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: transparent;
+  border: none;
+  box-shadow: none;
+  animation: none;
+}
+.projectile-soundwave::before,
+.projectile-soundwave::after {
+  content: "";
+  position: absolute;
+  inset: -30%;
+  border-radius: 46% 54% 50% 50% / 52% 48% 54% 46%;
+  border: 2px solid rgba(255, 247, 194, .85);
+  border-right-color: transparent;
+  border-bottom-color: transparent;
+  animation: soundwave-ripple .5s ease-out infinite;
+}
+.projectile-soundwave::after {
+  inset: -55%;
+  border-color: rgba(169, 233, 255, .55);
+  border-left-color: transparent;
+  border-top-color: transparent;
+  animation-delay: .15s;
+  animation-duration: .6s;
+}
+@keyframes soundwave-ripple {
+  0% { transform: scale(.4) rotate(0deg); opacity: 0; }
+  30% { opacity: .95; }
+  100% { transform: scale(1.3) rotate(35deg); opacity: 0; }
+}
+
+/* Ventania (Fada): correntes de ar reais em vez de linhas transparentes ou
+   glow — cast com arcos girando na conjuradora (wind-cast-swirl), rajada
+   com faixas curvas + poeira/folhas levadas pelo vento varrendo o cone
+   inteiro, na direção real do golpe (ver spawnWindGustCast/
+   spawnWindGustSweep). */
+.wind-cast-swirl {
+  position: absolute;
+  width: 5.5%;
+  aspect-ratio: 1;
+  translate: -50% -50%;
+  pointer-events: none;
+  z-index: 6;
+  animation: wind-swirl-fade 300ms ease-out forwards;
+}
+.wind-cast-swirl::before,
+.wind-cast-swirl::after {
+  content: "";
+  position: absolute;
+  inset: -34%;
+  border: 2px solid rgba(214, 240, 218, .78);
+  border-radius: 46% 54% 42% 58% / 55% 45% 58% 42%;
+  border-top-color: transparent;
+  border-left-color: transparent;
+  animation: wind-swirl-spin 280ms linear infinite;
+}
+.wind-cast-swirl::after {
+  inset: -58%;
+  animation-duration: 360ms;
+  animation-direction: reverse;
+  border-color: rgba(186, 224, 196, .55);
+  border-bottom-color: transparent;
+  border-right-color: transparent;
+}
+
+.wind-gust {
+  position: absolute;
+  width: 9%;
+  height: 9%;
+  translate: -50% -50%;
+  pointer-events: none;
+  z-index: 8;
+  animation: wind-gust-fade 420ms ease-out forwards;
+}
+.wind-gust::before,
+.wind-gust::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  height: 22%;
+  width: 92%;
+  border-radius: 50%;
+  background: linear-gradient(90deg, transparent 0%, rgba(224, 244, 224, .18) 12%, rgba(240, 252, 240, .82) 46%, rgba(240, 252, 240, .9) 54%, rgba(224, 244, 224, .18) 88%, transparent 100%);
+  filter: blur(.3px);
+  animation: wind-gust-pass 420ms ease-out forwards;
+}
+.wind-gust::after {
+  top: 38%;
+  height: 14%;
+  animation-delay: 40ms;
+  opacity: .7;
+}
+
+.wind-gust-mote {
+  position: absolute;
+  left: calc(50% + var(--mote-offset, 0%));
+  top: 50%;
+  width: 4%;
+  height: 4%;
+  border-radius: 30% 70% 60% 40%;
+  background: #e7f5df;
+  box-shadow: 0 0 3px rgba(220, 240, 210, .8);
+  opacity: 0;
+  animation: wind-gust-mote-fly 420ms ease-out var(--mote-delay, 0ms) forwards;
+}
+
+@keyframes wind-swirl-spin { to { rotate: 360deg; } }
+@keyframes wind-swirl-fade {
+  0% { opacity: 0; scale: .4; }
+  35% { opacity: 1; }
+  100% { opacity: 0; scale: 1.35; }
+}
+@keyframes wind-gust-fade {
+  0% { opacity: 0; }
+  20% { opacity: 1; }
+  100% { opacity: 0; }
+}
+@keyframes wind-gust-pass {
+  0% { transform: translate(-50%, -50%) rotate(var(--gust-angle, 0deg)) translateX(-40%) scaleX(.4); }
+  100% { transform: translate(-50%, -50%) rotate(var(--gust-angle, 0deg)) translateX(40%) scaleX(1); }
+}
+@keyframes wind-gust-mote-fly {
+  0% { opacity: 0; transform: translate(-50%, -50%) rotate(var(--mote-angle, 0deg)) translateX(-60%) scale(.6); }
+  25% { opacity: .95; }
+  100% { opacity: 0; transform: translate(-50%, -50%) rotate(var(--mote-angle, 0deg)) translateX(70%) scale(.4); }
+}
+
+/* Destruição Rastejante (Xamã): energia entra no chão (cast), rachaduras
+   avançam pelo terreno na direção do alvo (segmentos) e o solo erupciona no
+   ponto de chegada — ver spawnGroundCrackCast/Sweep/Eruption em game.js.
+   Nada de projétil aéreo, linha brilhante ou magia verde genérica. */
+.ground-crack-cast {
+  position: absolute;
+  width: 26px;
+  height: 26px;
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+  z-index: 5;
+}
+.ground-crack-cast::before,
+.ground-crack-cast::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(90, 62, 40, 0.85) 0%, transparent 70%);
+  animation: ground-crack-cast-pulse 0.3s ease-out forwards;
+}
+.ground-crack-cast::after {
+  background: radial-gradient(circle, rgba(40, 30, 20, 0.9) 0%, transparent 55%);
+  animation-delay: 0.05s;
+}
+@keyframes ground-crack-cast-pulse {
+  0% { opacity: 0; transform: scale(0.2); }
+  40% { opacity: 0.9; }
+  100% { opacity: 0; transform: scale(1.6); }
+}
+
+.ground-crack-segment {
+  position: absolute;
+  width: 26px;
+  height: 8px;
+  transform: translate(-50%, -50%) rotate(var(--crack-angle, 0deg));
+  pointer-events: none;
+  z-index: 5;
+}
+.ground-crack-segment::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  clip-path: polygon(0% 50%, 18% 20%, 36% 60%, 54% 15%, 72% 55%, 100% 30%, 100% 70%, 72% 85%, 54% 45%, 36% 90%, 18% 40%, 0% 80%);
+  background: linear-gradient(90deg, transparent, #2c1a10 30%, #6b4426 55%, #2c1a10 80%, transparent);
+  opacity: 0;
+  animation: ground-crack-appear 0.32s ease-out forwards;
+}
+@keyframes ground-crack-appear {
+  0% { opacity: 0; transform: scaleX(0.3); }
+  35% { opacity: 1; }
+  100% { opacity: 0; transform: scaleX(1); }
+}
+
+.ground-crack-debris {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 3px;
+  height: 3px;
+  border-radius: 1px;
+  background: #8a6a45;
+  box-shadow: 0 0 3px rgba(60, 40, 20, 0.8);
+  opacity: 0;
+  animation: ground-debris-pop 0.34s ease-out forwards;
+  animation-delay: var(--debris-delay, 0ms);
+}
+@keyframes ground-debris-pop {
+  0% { opacity: 0; transform: translate(0, 0); }
+  30% { opacity: 1; }
+  100% { opacity: 0; transform: translate(var(--dx), var(--dy)); }
+}
+
+.ground-eruption {
+  position: absolute;
+  width: 34px;
+  height: 34px;
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+  z-index: 6;
+}
+.ground-eruption::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(120, 80, 45, 0.9) 0%, rgba(40, 26, 14, 0.6) 55%, transparent 75%);
+  opacity: 0;
+  animation: ground-eruption-burst 0.42s ease-out forwards;
+}
+.ground-eruption::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  border: 2px solid rgba(60, 40, 22, 0.85);
+  opacity: 0;
+  animation: ground-eruption-rim 0.46s ease-out forwards;
+}
+@keyframes ground-eruption-burst {
+  0% { opacity: 0; transform: scale(0.2); }
+  35% { opacity: 1; }
+  100% { opacity: 0; transform: scale(1.5); }
+}
+@keyframes ground-eruption-rim {
+  0% { opacity: 0; transform: scale(0.4); }
+  40% { opacity: 0.8; }
+  100% { opacity: 0; transform: scale(1.9); }
+}
+
+/* Destruição Rastejante: nuvem de poeira cobrindo a faixa inteira conforme a
+   rachadura avança — sem isso o meio da faixa (tiles sem alvo) ficava
+   "vazio". Ver spawnGroundDustSweep em game.js. */
+.ground-dust-puff {
+  position: absolute;
+  width: 30px;
+  height: 30px;
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+  z-index: 5;
+}
+.ground-dust-puff::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: 44% 56% 42% 58% / 56% 44% 60% 40%;
+  background: radial-gradient(ellipse at 50% 50%, rgba(139, 106, 69, 0.55) 0%, rgba(70, 52, 32, 0.4) 48%, transparent 78%);
+  filter: blur(1.5px);
+  opacity: 0;
+  animation: ground-dust-drift 0.5s ease-out var(--puff-delay, 0ms) forwards;
+}
+@keyframes ground-dust-drift {
+  0% { opacity: 0; transform: scale(.4) translateY(2px); }
+  35% { opacity: .8; }
+  100% { opacity: 0; transform: scale(1.5) translateY(-6px); }
+}
+
+/* Envenenamento (Xamã): toxina viscosa se formando no conjurador (cast) e
+   respingo tóxico + vapor no alvo (splash) — mesma paleta ácida do status
+   Poisoned redesenhado (.poison-layer/.poison-bubbles), não a bola roxa
+   genérica de .impact-poison. Ver spawnToxinCastCue/spawnToxicSplash. */
+.toxin-cast {
+  position: absolute;
+  width: 24px;
+  height: 18px;
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+  z-index: 5;
+}
+.toxin-cast::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: 50% 50% 45% 45%;
+  background: radial-gradient(ellipse at 50% 60%, #9bea57 0%, #5f8a26 55%, transparent 80%);
+  opacity: 0;
+  animation: toxin-cast-bubble 0.34s ease-out forwards;
+}
+.toxin-cast::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  bottom: 60%;
+  width: 6px;
+  height: 6px;
+  margin-left: -3px;
+  border-radius: 50%;
+  background: rgba(200, 240, 170, 0.55);
+  opacity: 0;
+  animation: toxin-vapor-rise 0.38s ease-out 0.06s forwards;
+}
+@keyframes toxin-cast-bubble {
+  0% { opacity: 0; transform: scale(0.4); }
+  40% { opacity: 0.9; }
+  100% { opacity: 0; transform: scale(1.3); }
+}
+@keyframes toxin-vapor-rise {
+  0% { opacity: 0; transform: translateY(0) scale(0.6); }
+  40% { opacity: 0.85; }
+  100% { opacity: 0; transform: translateY(-14px) scale(1.4); }
+}
+
+.toxic-splash {
+  position: absolute;
+  width: 26px;
+  height: 22px;
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+  z-index: 6;
+}
+.toxic-splash::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  clip-path: polygon(50% 4%, 66% 18%, 82% 14%, 78% 34%, 96% 46%, 78% 58%, 84% 80%, 62% 70%, 50% 96%, 38% 70%, 16% 80%, 22% 58%, 4% 46%, 22% 34%, 18% 14%, 34% 18%);
+  background: radial-gradient(circle, #d7f28a 0%, #8bcf55 45%, #4d6b1c 75%, transparent 100%);
+  opacity: 0;
+  animation: toxic-splash-pop 0.3s ease-out forwards;
+}
+.toxic-splash::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: 30%;
+  width: 14px;
+  height: 14px;
+  margin: -7px;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(210, 240, 170, 0.6) 0%, transparent 70%);
+  opacity: 0;
+  animation: toxin-vapor-rise 0.42s ease-out 0.1s forwards;
+}
+@keyframes toxic-splash-pop {
+  0% { opacity: 0; transform: scale(0.3); }
+  35% { opacity: 1; }
+  100% { opacity: 0; transform: scale(1.25); }
+}
+
+/* Envenenamento: nuvem de fumaça tóxica cobrindo o cone inteiro conforme se
+   espalha — sem isso o meio do cone (tiles sem alvo) ficava "vazio". Ver
+   spawnToxicCloudSweep em game.js. */
+.toxic-cloud-puff {
+  position: absolute;
+  width: 34px;
+  height: 34px;
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+  z-index: 5;
+}
+.toxic-cloud-puff::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: 46% 54% 40% 60% / 55% 45% 58% 42%;
+  background: radial-gradient(ellipse at 50% 50%, rgba(155, 234, 87, 0.55) 0%, rgba(111, 149, 36, 0.4) 45%, transparent 78%);
+  filter: blur(1.5px);
+  opacity: 0;
+  animation: toxic-cloud-drift 0.5s ease-out var(--puff-delay, 0ms) forwards;
+}
+@keyframes toxic-cloud-drift {
+  0% { opacity: 0; transform: scale(.4) translateY(2px); }
+  35% { opacity: .85; }
+  100% { opacity: 0; transform: scale(1.5) translateY(-8px); }
+}
+
+/* Antídoto (Químico): química medicinal — ciano/verde claro/branco, bolhas
+   controladas, reação organizada. Contrasta de propósito com a toxina ácida
+   do Xamã acima (.toxin-cast/.toxic-splash). Ver item 23. */
+.antidote-cast {
+  position: absolute;
+  width: 20px;
+  height: 20px;
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+  z-index: 5;
+}
+.antidote-cast::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  background: radial-gradient(circle, #eafffb 0%, #8fe3d0 55%, transparent 78%);
+  opacity: 0;
+  animation: antidote-cast-pulse .32s ease-out forwards;
+}
+.antidote-cast::after {
+  content: "";
+  position: absolute;
+  left: 30%;
+  top: 20%;
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, .85);
+  opacity: 0;
+  animation: antidote-bubble-rise .34s ease-out .05s forwards;
+}
+@keyframes antidote-cast-pulse {
+  0% { opacity:0; transform:scale(.3); }
+  40% { opacity:.9; }
+  100% { opacity:0; transform:scale(1.4); }
+}
+@keyframes antidote-bubble-rise {
+  0% { opacity:0; transform:translateY(0); }
+  40% { opacity:.9; }
+  100% { opacity:0; transform:translateY(-10px); }
+}
+
+.antidote-transfer {
+  position: absolute;
+  width: 22px;
+  height: 22px;
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+  z-index: 6;
+}
+.antidote-transfer::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  background: radial-gradient(circle, #ffffff 0%, #d8f7ff 40%, #8fe3d0 70%, transparent 88%);
+  opacity: 0;
+  animation: antidote-transfer-drop .36s ease-out forwards;
+}
+@keyframes antidote-transfer-drop {
+  0% { opacity:0; transform:scale(.4) translateY(-6px); }
+  40% { opacity:.95; }
+  100% { opacity:0; transform:scale(1.1) translateY(2px); }
+}
+
+.antidote-reaction {
+  position: absolute;
+  width: 26px;
+  height: 26px;
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+  z-index: 6;
+}
+.antidote-reaction::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  background: radial-gradient(circle, #ffffff 0%, #d8f7ff 45%, transparent 78%);
+  opacity: 0;
+  animation: antidote-reaction-fizz .4s ease-out forwards;
+}
+.antidote-reaction-toxin::before {
+  background: radial-gradient(circle, #ffffff 0%, #d8f7ff 35%, #8fe3d0 60%, transparent 82%);
+}
+@keyframes antidote-reaction-fizz {
+  0% { opacity:0; transform:scale(.3); }
+  35% { opacity:1; }
+  100% { opacity:0; transform:scale(1.5); }
+}
+
+@keyframes projectile-pulse {
+  from {
+    transform: translate(-50%, -50%) scale(1);
+  }
+  to {
+    transform: translate(-50%, -50%) scale(1.2);
+  }
+}
+
+@keyframes projectile-spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* --- Feixes instantâneos (Relâmpago, Raio de Gelo): uma linha que já nasce
+   esticada e some rápido, em vez de "viajar" (ver spawnBeam). */
+.cast-cue {
+  position: absolute;
+  z-index: 6;
+  width: 4.8%;
+  aspect-ratio: 1;
+  translate: -50% -50%;
+  border: 2px solid rgba(224, 235, 255, .88);
+  border-radius: 50%;
+  box-shadow: 0 0 8px rgba(163, 204, 255, .6), inset 0 0 7px rgba(255,255,255,.45);
+  pointer-events: none;
+  animation: cast-cue-form var(--cast-duration, 160ms) ease-out forwards;
+}
+.cast-cue::before,.cast-cue::after { content:""; position:absolute; inset:18%; border:1px dashed currentColor; border-radius:inherit; animation:status-orbit .55s linear infinite; }
+.cast-cue::after { inset:38%; border-style:solid; background:currentColor; opacity:.45; }
+.cast-cue-channel { color:#c9a3ff; }
+.cast-cue-release { color:#ecd59b; border-radius:45% 55% 45% 55%; }
+.cast-cue-throw { color:#9be36b; border-radius:45% 55% 50% 42%; }
+.cast-cue-pulse { color:#a9e9ff; box-shadow:0 0 12px rgba(116,222,255,.72); }
+.ability-vfx-fireball { color:#ff9a4d; }
+
+/* Raio de Gelo: cristais pequenos surgindo e crescendo antes da liberação —
+   não o anel orbital genérico dos outros "channel" (item 26). */
+.cast-cue.ability-vfx-ice-ray {
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+  background: none;
+}
+.cast-cue.ability-vfx-ice-ray::before,
+.cast-cue.ability-vfx-ice-ray::after {
+  content: "";
+  position: absolute;
+  width: 60%;
+  height: 60%;
+  background: linear-gradient(135deg, #ffffff, #8ec6ff);
+  clip-path: polygon(50% 0%, 100% 50%, 50% 100%, 0% 50%);
+  animation: ice-crystal-grow var(--cast-duration, 150ms) ease-out forwards;
+}
+.cast-cue.ability-vfx-ice-ray::before { left: 10%; top: 15%; animation-delay: 0ms; }
+.cast-cue.ability-vfx-ice-ray::after { left: 45%; top: 40%; animation-delay: 40ms; }
+@keyframes ice-crystal-grow {
+  0% { opacity: 0; transform: scale(.2) rotate(0deg); }
+  50% { opacity: 1; }
+  100% { opacity: 0; transform: scale(1.1) rotate(15deg); }
+}
+
+/* Míssil Mágico: fragmentos rúnicos pequenos convergindo antes da
+   liberação — não o anel orbital genérico dos outros "channel" (item 27). */
+.cast-cue.ability-vfx-missile {
+  border: 0;
+  box-shadow: none;
+  background: none;
+}
+.cast-cue.ability-vfx-missile::before,
+.cast-cue.ability-vfx-missile::after {
+  content: "";
+  position: absolute;
+  width: 24%;
+  height: 24%;
+  background: linear-gradient(135deg, #e8d9ff, #a37bff);
+  animation: missile-cast-converge var(--cast-duration, 180ms) ease-in forwards;
+}
+.cast-cue.ability-vfx-missile::before { left: 8%; top: 28%; transform: rotate(20deg); animation-delay: 0ms; }
+.cast-cue.ability-vfx-missile::after { left: 66%; top: 56%; transform: rotate(-15deg); animation-delay: 30ms; }
+@keyframes missile-cast-converge {
+  0% { opacity: 0; transform: scale(1.6) rotate(0deg); }
+  40% { opacity: 1; }
+  100% { opacity: 0; transform: scale(.3) rotate(80deg); }
+}
+
+/* Míssil Mágico: núcleo comprime, flash arcano, fragmentos se quebram —
+   dissipação de mana, não uma explosão genérica. */
+.missile-impact {
+  position: absolute;
+  width: 26px;
+  height: 26px;
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+  z-index: 6;
+}
+.missile-impact::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  background: radial-gradient(circle, #ffffff 0%, #c9a3ff 45%, transparent 78%);
+  opacity: 0;
+  animation: missile-impact-flash .28s ease-out forwards;
+}
+.missile-impact::after {
+  content: "";
+  position: absolute;
+  inset: 15%;
+  border: 2px solid rgba(163, 123, 255, .6);
+  clip-path: polygon(50% 0%, 61% 35%, 98% 35%, 68% 57%, 79% 91%, 50% 70%, 21% 91%, 32% 57%, 2% 35%, 39% 35%);
+  opacity: 0;
+  animation: missile-impact-shatter .4s ease-out forwards;
+}
+@keyframes missile-impact-flash {
+  0% { opacity: 0; transform: scale(.3); }
+  35% { opacity: 1; }
+  100% { opacity: 0; transform: scale(1.3); }
+}
+@keyframes missile-impact-shatter {
+  0% { opacity: 0; transform: scale(.4) rotate(0deg); }
+  40% { opacity: .9; }
+  100% { opacity: 0; transform: scale(1.6) rotate(25deg); }
+}
+
+/* Flecha Normal (Arqueiro): encaixa/puxa corda antes do disparo — arco em
+   arco (metade de um anel) com a corda puxando pra trás e voltando no
+   release, não o anel orbital genérico dos outros "release" — item 24. */
+.cast-cue.ability-vfx-arrow {
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+  background: none;
+  animation: bow-draw-release var(--cast-duration, 140ms) ease-out forwards;
+}
+.cast-cue.ability-vfx-arrow::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border: 2px solid #c9a066;
+  border-radius: 50%;
+  clip-path: inset(0 50% 0 0);
+  opacity: .9;
+}
+.cast-cue.ability-vfx-arrow::after {
+  content: "";
+  position: absolute;
+  left: 48%;
+  top: 10%;
+  width: 2px;
+  height: 80%;
+  background: #e8e4d8;
+  animation: bowstring-pull var(--cast-duration, 140ms) ease-out forwards;
+}
+@keyframes bow-draw-release {
+  0% { opacity: 0; transform: scale(.7); }
+  50% { opacity: 1; transform: scale(1); }
+  100% { opacity: 0; transform: scale(1.05); }
+}
+@keyframes bowstring-pull {
+  0% { transform: translateX(0) scaleY(1); }
+  60% { transform: translateX(-30%) scaleY(.9); }
+  100% { transform: translateX(0) scaleY(1); }
+}
+
+/* Flecha: spark/fragmento de madeira físico no impacto, sem glow azulado —
+   camada extra sobre o flash genérico de playAttackFx (ver item 24). */
+.arrow-impact-spark {
+  position: absolute;
+  width: 14px;
+  height: 14px;
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+  z-index: 6;
+}
+.arrow-impact-spark::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(circle, #fff6e0 0%, #d8c48a 45%, transparent 75%);
+  border-radius: 50%;
+  opacity: 0;
+  animation: arrow-spark-pop .22s ease-out forwards;
+}
+@keyframes arrow-spark-pop {
+  0% { opacity: 0; transform: scale(.3); }
+  40% { opacity: 1; }
+  100% { opacity: 0; transform: scale(1.3); }
+}
+
+/* Tiro Explosivo/Normal (Químico, Arma de Fogo): clarão de disparo curto e
+   direcional (cunha), não o anel orbital genérico dos outros "release" —
+   ver item 22. */
+.cast-cue.ability-vfx-bullet {
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+  clip-path: polygon(0% 50%, 55% 15%, 100% 50%, 55% 85%);
+  background: radial-gradient(circle at 25% 50%, #fff6c9 0%, #ffcf6a 40%, transparent 78%);
+  animation: muzzle-flash-pop var(--cast-duration, 120ms) ease-out forwards;
+}
+.cast-cue.ability-vfx-bullet::before,
+.cast-cue.ability-vfx-bullet::after { content: none; }
+@keyframes muzzle-flash-pop {
+  0% { opacity: 0; transform: scale(.4); }
+  35% { opacity: 1; transform: scale(1.15); }
+  100% { opacity: 0; transform: scale(1.3); }
+}
+
+/* Tiro Explosivo: detonação concentrada no impacto — núcleo quente pequeno
+   e curto, distinto da explosão maior da Bomba (.area-burst-bomb). */
+.explosive-shot-burst {
+  position: absolute;
+  width: 26px;
+  height: 26px;
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+  z-index: 6;
+}
+.explosive-shot-burst::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  background: radial-gradient(circle, #fff6c9 0 14%, #ffb347 34%, #d9401a 62%, transparent 82%);
+  opacity: 0;
+  animation: explosive-shot-flash .3s ease-out forwards;
+}
+.explosive-shot-burst::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  border: 2px solid rgba(255, 179, 71, 0.75);
+  opacity: 0;
+  animation: explosive-shot-rim .34s ease-out forwards;
+}
+@keyframes explosive-shot-flash {
+  0% { opacity: 0; transform: scale(.3); }
+  35% { opacity: 1; }
+  100% { opacity: 0; transform: scale(1.2); }
+}
+@keyframes explosive-shot-rim {
+  0% { opacity: 0; transform: scale(.4); }
+  40% { opacity: .85; }
+  100% { opacity: 0; transform: scale(1.6); }
+}
+.ability-vfx-ice-ray { color:#bfe9ff; }
+.ability-vfx-flask,.ability-vfx-bomb { color:#9be36b; }
+
+/* Cast da Bola de Fogo: a Maga concentra calor no cajado — em vez do anel
+   pontilhado genérico, um miolo de chama irregular ganha massa e faísca
+   pequenas brasas puxadas pra dentro (ver spawnCastCue). */
+.cast-cue.ability-vfx-fireball {
+  border: none;
+  border-radius: 46% 54% 41% 59% / 55% 45% 58% 42%;
+  background:
+    radial-gradient(ellipse at 50% 55%, #fffbd6 0 10%, #ffd137 26%, #ff6b18 55%, transparent 78%),
+    conic-gradient(from 30deg, transparent 0 10%, #ffb12e 14% 24%, transparent 28% 40%, #ef4a12 44% 54%, transparent 58% 70%, #ff8a21 74% 84%, transparent 88%);
+  box-shadow: 0 0 10px rgba(255, 130, 30, 0.5);
+  animation: cast-cue-form var(--cast-duration, 160ms) ease-out forwards, fire-impact-turbulence 180ms ease-in-out infinite alternate;
+}
+.cast-cue.ability-vfx-fireball::before,
+.cast-cue.ability-vfx-fireball::after {
+  content: "";
+  position: absolute;
+  inset: 30%;
+  border: none;
+  background: radial-gradient(circle, #fff2b0 0 30%, #ff7a20 60%, transparent 85%);
+  border-radius: 50% 40% 55% 45%;
+  animation: fireball-cast-ember-gather-a 320ms ease-in forwards;
+}
+.cast-cue.ability-vfx-fireball::after {
+  animation-name: fireball-cast-ember-gather-b;
+  animation-delay: 40ms;
+}
+.cast-cue-fireball-spark {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 3px;
+  height: 3px;
+  border-radius: 50% 40% 55% 45%;
+  background: #ffdc85;
+  box-shadow: 0 0 5px #ff7a20;
+  opacity: 0;
+  animation: fireball-cast-spark-gather var(--cast-duration, 160ms) ease-in var(--spark-delay, 0ms) forwards;
+}
+@keyframes fireball-cast-ember-gather-a {
+  0% { opacity: 0; transform: translate(140%, -80%) scale(0.4); }
+  70% { opacity: 0.9; }
+  100% { opacity: 0.55; transform: translate(0, 0) scale(1); }
+}
+@keyframes fireball-cast-ember-gather-b {
+  0% { opacity: 0; transform: translate(-130%, 90%) scale(0.4); }
+  70% { opacity: 0.85; }
+  100% { opacity: 0.5; transform: translate(0, 0) scale(1); }
+}
+@keyframes fireball-cast-spark-gather {
+  0% { opacity: 0; transform: translate(calc(-50% + var(--spark-x, 0px)), calc(-50% + var(--spark-y, 0px))) scale(0.5); }
+  55% { opacity: 1; }
+  100% { opacity: 0.7; transform: translate(-50%, -50%) scale(1); }
+}
+/* --spark-x/--spark-y precisam ser px, não %: percentual em translate() é
+   relativo à própria caixa da faísca (3px), não ao cast-cue — em % a
+   convergência ficaria imperceptível. */
+
+/* Explosão Sonora (Fada): energia/vibração sonora se concentrando — anéis
+   irregulares pulsando pra dentro, não o dashed genérico de qualquer magia
+   "pulse". */
+.cast-cue.ability-vfx-sound {
+  border: none;
+  border-radius: 50%;
+  background: transparent;
+  box-shadow: none;
+}
+.cast-cue.ability-vfx-sound::before,
+.cast-cue.ability-vfx-sound::after {
+  border: 2px dashed rgba(255, 247, 194, .85);
+  border-radius: 48% 52% 50% 50% / 52% 48% 51% 49%;
+  animation: sound-cast-pulse-ring .4s ease-out infinite;
+}
+.cast-cue.ability-vfx-sound::after {
+  animation-delay: .15s;
+  border-color: rgba(169, 233, 255, .62);
+  border-style: solid;
+}
+@keyframes sound-cast-pulse-ring {
+  0% { transform: scale(.35); opacity: 0; }
+  50% { opacity: 1; }
+  100% { transform: scale(1.2); opacity: 0; }
+}
+
+.projectile-trajectory-pulse { filter:drop-shadow(0 0 7px currentColor); }
+.projectile-trajectory-spin::before { animation:projectile-spin .16s linear infinite; }
+.projectile-trajectory-wave::after { content:""; position:absolute; inset:-75%; border:1px solid currentColor; border-radius:50%; animation:projectile-wave .32s ease-out infinite; }
+.projectile-trajectory-arc::after { content:""; position:absolute; width:135%; height:135%; left:-18%; top:-55%; border-top:2px solid rgba(255,255,255,.5); border-radius:50%; animation:projectile-arc-glint .42s ease-in-out infinite alternate; }
+.projectile-trajectory-float { animation:projectile-float .24s ease-in-out infinite alternate; }
+@keyframes cast-cue-form { from{opacity:0;scale:.25;rotate:-45deg} 65%{opacity:1;scale:1.08} to{opacity:.15;scale:.82;rotate:35deg} }
+@keyframes projectile-spin { to{rotate:360deg} }
+@keyframes projectile-wave { from{opacity:.8;scale:.35} to{opacity:0;scale:1.3} }
+@keyframes projectile-arc-glint { from{translate:0 0;opacity:.3} to{translate:0 -18%;opacity:.85} }
+@keyframes projectile-float { from{margin-top:-2px} to{margin-top:3px} }
+
+.beam-effect {
+  position: absolute;
+  height: 4px;
+  transform-origin: 0 50%;
+  transform: rotate(var(--angle, 0deg));
+  border-radius: 2px;
+  pointer-events: none;
+  z-index: 9;
+  animation: beam-flash 0.3s ease-out forwards;
+}
+
+@keyframes beam-flash {
+  0% {
+    opacity: 1;
+    transform: rotate(var(--angle, 0deg)) scaleY(1.8);
+  }
+  100% {
+    opacity: 0;
+    transform: rotate(var(--angle, 0deg)) scaleY(1);
+  }
+}
+
+/* .beam-lightning e .beam-ice removidas: Relâmpago e Raio de Gelo agora usam
+   feixes procedurais próprios (spawnLightningBolt/spawnIceBeam) em vez do
+   spawnBeam genérico compartilhado — ver itens 26 e "Relâmpago" do
+   redesign. */
+
+/* Relâmpago (Maga): eletricidade se acumulando na conjuradora — arcos
+   quebrados aparecendo/sumindo, não uma esfera elétrica genérica. */
+.lightning-cast {
+  position: absolute;
+  width: 16%;
+  height: 16%;
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+  z-index: 6;
+}
+.lightning-cast::before,
+.lightning-cast::after {
+  content: "";
+  position: absolute;
+  width: 40%;
+  height: 70%;
+  background: linear-gradient(180deg, #ffffff, #7ecbff);
+  clip-path: polygon(60% 0%, 20% 45%, 45% 45%, 10% 100%, 80% 40%, 50% 40%);
+  opacity: 0;
+  animation: lightning-cast-spark 0.22s steps(2, end) infinite;
+}
+.lightning-cast::before { left: 10%; top: 5%; animation-delay: 0ms; }
+.lightning-cast::after { left: 45%; top: 30%; transform: scale(.7) rotate(15deg); animation-delay: 90ms; }
+@keyframes lightning-cast-spark {
+  0%, 100% { opacity: 0; }
+  40% { opacity: 1; }
+  60% { opacity: 0; }
+  80% { opacity: .8; }
+}
+
+/* Relâmpago: descarga quebrada/angular/ramificada — não uma linha reta com
+   glow (REGRA PRINCIPAL do redesign). SVG real (ver spawnLightningBolt em
+   game.js), não clip-path — um zig-zag com ramificações precisa de um
+   polyline de verdade. */
+.lightning-bolt {
+  position: absolute;
+  height: 28px;
+  transform-origin: 0 50%;
+  transform: rotate(var(--angle, 0deg));
+  pointer-events: none;
+  z-index: 9;
+  overflow: visible;
+  animation: lightning-flicker 0.22s steps(4, end) forwards;
+}
+.lightning-glow {
+  fill: none;
+  stroke: #4fb3ff;
+  stroke-width: 10;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  opacity: .35;
+  filter: blur(2px);
+}
+.lightning-main {
+  fill: none;
+  stroke: #7ecbff;
+  stroke-width: 3.2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.lightning-core {
+  fill: none;
+  stroke: #ffffff;
+  stroke-width: 1.2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.lightning-branch {
+  fill: none;
+  stroke: #a8dfff;
+  stroke-width: 1.4;
+  stroke-linecap: round;
+  opacity: .8;
+  animation: lightning-branch-fade 0.18s ease-out forwards;
+}
+@keyframes lightning-flicker {
+  0% { opacity: 0; }
+  15% { opacity: 1; }
+  40% { opacity: .5; }
+  55% { opacity: 1; }
+  75% { opacity: .3; }
+  100% { opacity: 0; }
+}
+@keyframes lightning-branch-fade {
+  0% { opacity: 0; }
+  30% { opacity: .9; }
+  100% { opacity: 0; }
+}
+
+/* Relâmpago: impacto — flash localizado + eletricidade se espalhando pela
+   silhueta (não explosão de fogo). Não aplica Frozen/Paralyzed, então
+   termina limpo, sem virar aura persistente. */
+.lightning-impact {
+  position: absolute;
+  width: 34px;
+  height: 46px;
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+  z-index: 6;
+}
+.lightning-impact::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  background: radial-gradient(circle, #ffffff 0%, #7ecbff 45%, transparent 78%);
+  opacity: 0;
+  animation: lightning-impact-flash 0.18s ease-out forwards;
+}
+.lightning-impact::after {
+  content: "";
+  position: absolute;
+  left: 20%;
+  top: 0;
+  width: 60%;
+  height: 100%;
+  background: linear-gradient(180deg, #ffffff, #7ecbff);
+  clip-path: polygon(50% 0%, 30% 30%, 55% 32%, 20% 62%, 60% 55%, 40% 100%, 75% 45%, 48% 42%, 80% 15%);
+  opacity: 0;
+  animation: lightning-impact-crawl 0.3s steps(3, end) forwards;
+}
+@keyframes lightning-impact-flash {
+  0% { opacity: 0; transform: scale(.3); }
+  30% { opacity: 1; }
+  100% { opacity: 0; transform: scale(1.3); }
+}
+@keyframes lightning-impact-crawl {
+  0%, 100% { opacity: 0; }
+  25% { opacity: 1; }
+  50% { opacity: .5; }
+  75% { opacity: .9; }
+}
+
+/* Raio de Gelo (Mago): feixe em camadas — núcleo, corpo irregular, névoa e
+   cristais viajando — não um raio ciano reto com glow. Ver spawnIceBeam em
+   game.js (item 26). */
+.ice-beam {
+  position: absolute;
+  height: 0;
+  transform-origin: 0 50%;
+  transform: rotate(var(--angle, 0deg));
+  pointer-events: none;
+  z-index: 9;
+}
+.ice-beam-frost {
+  position: absolute;
+  left: 0;
+  top: 50%;
+  width: 100%;
+  height: 16px;
+  transform: translateY(-50%);
+  background: linear-gradient(90deg, rgba(255, 255, 255, .5), rgba(142, 198, 255, .35) 55%, transparent);
+  filter: blur(3px);
+  opacity: 0;
+  animation: ice-beam-frost-flash .38s ease-out forwards;
+}
+.ice-beam-body {
+  position: absolute;
+  left: 0;
+  top: 50%;
+  width: 100%;
+  height: 6px;
+  transform: translateY(-50%);
+  clip-path: polygon(0% 30%, 8% 60%, 16% 20%, 24% 70%, 32% 35%, 40% 65%, 48% 25%, 56% 70%, 64% 30%, 72% 60%, 80% 20%, 88% 65%, 96% 35%, 100% 55%, 100% 45%, 96% 65%, 88% 35%, 80% 80%, 72% 40%, 64% 70%, 56% 30%, 48% 75%, 40% 35%, 32% 65%, 24% 30%, 16% 80%, 8% 40%, 0% 70%);
+  background: linear-gradient(90deg, #eaf9ff, #8ec6ff 55%, rgba(142, 198, 255, .2));
+  box-shadow: 0 0 6px rgba(142, 198, 255, .7);
+  opacity: 0;
+  animation: ice-beam-flash .32s ease-out forwards;
+}
+.ice-beam-core {
+  position: absolute;
+  left: 0;
+  top: 50%;
+  width: 100%;
+  height: 2px;
+  transform: translateY(-50%);
+  background: linear-gradient(90deg, #ffffff, #d8f3ff 65%, transparent);
+  box-shadow: 0 0 4px rgba(255, 255, 255, .9);
+  opacity: 0;
+  animation: ice-beam-flash .3s ease-out forwards;
+}
+.ice-beam-crystal {
+  position: absolute;
+  left: var(--crystal-pos, 20%);
+  top: 50%;
+  width: 5px;
+  height: 5px;
+  transform: translate(-50%, -50%) rotate(45deg);
+  background: linear-gradient(135deg, #ffffff, #bfe9ff);
+  opacity: 0;
+  animation: ice-beam-crystal-travel .3s ease-out var(--crystal-delay, 0ms) forwards;
+}
+@keyframes ice-beam-frost-flash {
+  0% { opacity: 0; }
+  30% { opacity: .8; }
+  100% { opacity: 0; }
+}
+@keyframes ice-beam-flash {
+  0% { opacity: 0; }
+  25% { opacity: 1; }
+  100% { opacity: 0; }
+}
+@keyframes ice-beam-crystal-travel {
+  0% { opacity: 0; transform: translate(-50%, -50%) rotate(45deg) scale(.4); }
+  40% { opacity: 1; }
+  100% { opacity: 0; transform: translate(-50%, -50%) rotate(70deg) scale(.9); }
+}
+
+/* Raio de Gelo: impacto — cristais surgem no lado atingido, shards se
+   desprendem, frost se espalha. Não aplica Frozen (só reduz agilidade), então
+   o gelo quebra/dissipa em vez de virar aura persistente. */
+.ice-impact-crystals {
+  position: absolute;
+  width: 28px;
+  height: 28px;
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+  z-index: 6;
+}
+.ice-impact-crystals::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  background: radial-gradient(circle, #ffffff 0%, #bfe9ff 45%, transparent 78%);
+  opacity: 0;
+  animation: ice-impact-flash .3s ease-out forwards;
+}
+.ice-impact-crystals::after {
+  content: "";
+  position: absolute;
+  inset: 20%;
+  clip-path: polygon(50% 0%, 62% 30%, 92% 38%, 68% 58%, 76% 90%, 50% 70%, 24% 90%, 32% 58%, 8% 38%, 38% 30%);
+  background: linear-gradient(135deg, #ffffff, #8ec6ff);
+  opacity: 0;
+  animation: ice-impact-shard-grow .42s ease-out forwards;
+}
+@keyframes ice-impact-flash {
+  0% { opacity: 0; transform: scale(.3); }
+  35% { opacity: 1; }
+  100% { opacity: 0; transform: scale(1.4); }
+}
+@keyframes ice-impact-shard-grow {
+  0% { opacity: 0; transform: scale(.2) rotate(-8deg); }
+  40% { opacity: .95; }
+  100% { opacity: 0; transform: scale(1.3) rotate(10deg); }
+}
+
+.beam-arcane {
+  background: linear-gradient(90deg, #f0e2ff, #c9a3ff 60%, transparent);
+  box-shadow: 0 0 10px 2px rgba(201, 163, 255, 0.8);
+}
+
+/* --- Explosões em área (Bola de Fogo, Congelamento): nascem pequenas no
+   centro do impacto e se expandem até cobrir o raio de efeito. */
+.area-burst {
+  position: absolute;
+  transform: translate(-50%, -50%);
+  border-radius: 50%;
+  pointer-events: none;
+  z-index: 7;
+  animation: area-burst-grow 0.5s ease-out forwards;
+}
+
+@keyframes area-burst-grow {
+  0% {
+    opacity: 0.9;
+    transform: translate(-50%, -50%) scale(0.15);
+  }
+  60% {
+    opacity: 0.65;
+  }
+  100% {
+    opacity: 0;
+    transform: translate(-50%, -50%) scale(1);
+  }
+}
+
+/* Bomba (Químico): detonação química irregular — núcleo ácido-amarelado,
+   não o vermelho/laranja de .area-burst-fire — com fumaça curta em vez de
+   labareda. */
+.area-burst-bomb {
+  border-radius: 50%;
+  clip-path: polygon(50% 0%, 62% 12%, 78% 6%, 74% 26%, 96% 30%, 80% 44%, 98% 58%, 76% 62%, 84% 84%, 60% 74%, 54% 98%, 42% 76%, 20% 88%, 26% 64%, 4% 60%, 22% 44%, 2% 28%, 26% 24%, 22% 4%, 40% 14%);
+  background:
+    radial-gradient(ellipse at 50% 50%, rgba(240, 255, 170, 0.95) 0 8%, #d9e35c 18%, #8a8a52 42%, rgba(60, 60, 40, 0.85) 62%, transparent 80%);
+  box-shadow: inset 0 0 14px rgba(217, 227, 92, 0.5), 0 0 14px rgba(80, 80, 50, 0.4);
+}
+.area-burst-bomb::before {
+  content: "";
+  position: absolute;
+  inset: 20%;
+  border-radius: 50%;
+  background: radial-gradient(circle, #fff8d0 0 14%, #d9e35c 30%, #6b6b45 58%, transparent 78%);
+  mix-blend-mode: screen;
+  animation: bomb-burst-flash 260ms ease-out forwards;
+}
+.area-burst-bomb::after {
+  content: "";
+  position: absolute;
+  inset: 6%;
+  border-radius: 46% 54% 40% 60% / 55% 45% 58% 42%;
+  background: radial-gradient(ellipse at 50% 40%, rgba(120, 120, 95, 0.55) 0%, rgba(80, 80, 60, 0.35) 40%, transparent 72%);
+  animation: bomb-smoke-puff 480ms ease-out forwards;
+}
+@keyframes bomb-burst-flash {
+  0% { opacity:1; transform:scale(.4); }
+  100% { opacity:0; transform:scale(1.3); }
+}
+@keyframes bomb-smoke-puff {
+  0% { opacity:0; transform:translateY(0) scale(.6); }
+  30% { opacity:.85; }
+  100% { opacity:0; transform:translateY(-12%) scale(1.35); }
+}
+
+.area-burst-fire {
+  border-radius: 46% 54% 43% 57% / 58% 42% 56% 44%;
+  clip-path: polygon(50% 1%, 59% 15%, 72% 5%, 75% 22%, 94% 17%, 86% 37%, 100% 50%, 83% 59%, 94% 78%, 72% 76%, 66% 98%, 51% 82%, 35% 100%, 31% 78%, 8% 84%, 17% 61%, 0 49%, 18% 38%, 7% 18%, 30% 23%);
+  background:
+    radial-gradient(ellipse at 50% 55%, rgba(255,255,224,.98) 0 7%, #ffd34e 11%, #ff7a20 30%, rgba(208,38,9,.9) 49%, transparent 68%),
+    conic-gradient(from 12deg, transparent 0 6%, #ffb12e 7% 13%, transparent 15% 24%, #ef4a12 26% 34%, transparent 36% 47%, #ff8a21 49% 59%, transparent 61% 72%, #d92c0d 74% 84%, transparent 86%);
+  box-shadow: inset 0 0 18px rgba(255, 242, 167, .72), 0 0 18px rgba(255, 83, 18, .45);
+}
+
+.area-burst-fire::before {
+  content: "";
+  position: absolute;
+  inset: 17%;
+  border-radius: 39% 61% 52% 48% / 63% 38% 62% 37%;
+  background:
+    radial-gradient(ellipse at 48% 55%, #fffbd6 0 12%, #ffd137 22%, #ff6b18 49%, transparent 70%),
+    conic-gradient(from -22deg, #ffca37, transparent 16%, #ec3b10 28%, transparent 44%, #ff8a21 61%, transparent 77%, #d9230c);
+  mix-blend-mode: screen;
+  animation: fire-impact-turbulence 230ms ease-in-out infinite alternate;
+}
+
+.area-burst-fire::after {
+  content: "";
+  position: absolute;
+  inset: 31%;
+  border-radius: 50%;
+  background: radial-gradient(circle, #fff 0 8%, #fff4a8 18%, #ff9b24 46%, transparent 72%);
+  filter: drop-shadow(0 0 6px #ff7a20);
+}
+
+.fire-impact-ember {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 1.8%;
+  aspect-ratio: 1;
+  border-radius: 50% 45% 55% 35%;
+  background: #fff0a0;
+  box-shadow: 0 0 4px #ff5a13;
+  transform: translate(-50%, -50%) scale(var(--ember-scale, 1));
+  animation: fire-impact-ember-fly 470ms cubic-bezier(.16,.62,.24,1) var(--ember-delay, 0ms) forwards;
+}
+
+/* Contato -> compressão: um flash branco/amarelo curto e nítido que estoura
+   antes da chama se expandir, dando peso ao instante do impacto em vez de a
+   explosão nascer direto no tamanho final (ver spawnAreaBurst). */
+.fire-impact-flash {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 34%;
+  height: 34%;
+  border-radius: 50%;
+  background: radial-gradient(circle, #fffef0 0 30%, #ffe9a8 55%, transparent 78%);
+  transform: translate(-50%, -50%) scale(0.2);
+  opacity: 0;
+  animation: fire-impact-flash-pop 150ms cubic-bezier(0.1, 0.8, 0.3, 1) forwards;
+  z-index: 2;
+  pointer-events: none;
+}
+@keyframes fire-impact-flash-pop {
+  0% { opacity: 0; transform: translate(-50%, -50%) scale(0.2); }
+  35% { opacity: 1; transform: translate(-50%, -50%) scale(1.3); }
+  100% { opacity: 0; transform: translate(-50%, -50%) scale(1.6); }
+}
+
+/* Dissipação: fumaça leve subindo depois que a chama já abriu, pra fechar o
+   ciclo contato -> compressão -> expansão -> brasas -> dissipação em vez de a
+   explosão simplesmente sumir. Elemento irmão do burst (ver spawnAreaBurst),
+   posicionado via left/top inline — não filho, senão a opacity decrescente
+   do burst multiplicaria na dela e a fumaça sumiria cedo demais. */
+.fire-impact-smoke {
+  position: absolute;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(70, 58, 52, 0.55) 0%, transparent 72%);
+  opacity: 0;
+  animation: fire-impact-smoke-rise 460ms ease-out var(--smoke-delay, 220ms) forwards;
+  z-index: 4;
+  pointer-events: none;
+}
+@keyframes fire-impact-smoke-rise {
+  0% { opacity: 0; transform: translate(calc(-50% + var(--smoke-x, 0px)), -50%) scale(0.5); }
+  30% { opacity: 0.55; }
+  100% { opacity: 0; transform: translate(calc(-50% + var(--smoke-x, 0px)), calc(-50% - 34px)) scale(1.3); }
+}
+
+@keyframes fire-impact-turbulence {
+  from { transform: rotate(-9deg) scale(.92, 1.07); }
+  to { transform: rotate(8deg) scale(1.08, .9); }
+}
+
+/* --ember-x/--ember-y precisam mover left/top (% do pai), não o transform:
+   percentual em transform:translate() é relativo à própria caixa minúscula
+   da brasa, então a "explosão pra fora" ficava travada perto do centro. */
+@keyframes fire-impact-ember-fly {
+  0% { opacity: 1; left: 50%; top: 50%; transform: translate(-50%, -50%) scale(var(--ember-scale, 1)); }
+  68% { opacity: .88; }
+  100% { opacity: 0; left: calc(50% + var(--ember-x)); top: calc(50% + var(--ember-y)); transform: translate(-50%, -50%) scale(.18); }
+}
+
+.area-burst-frost {
+  background: radial-gradient(circle, #ffffff 0%, #8ec6ff 45%, transparent 75%);
+}
+
+/* Explosão Sonora (Fada): choque acústico — ondas segmentadas/irregulares
+   (não um anel perfeito) se sobrepõem e vibram, sem preenchimento sólido,
+   sem fogo/fumaça/debris. Reaproveita o crescimento de spawnAreaBurst
+   (area-burst-grow), só troca o preenchimento por essas ondas. */
+.area-burst-sound {
+  background: transparent;
+  border: none;
+  box-shadow: none;
+}
+.area-burst-sound::before,
+.area-burst-sound::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: 48% 52% 50% 50% / 52% 48% 51% 49%;
+  border: 3px dashed rgba(255, 247, 194, .82);
+}
+.area-burst-sound::after {
+  inset: 13%;
+  border-style: solid;
+  border-color: rgba(169, 233, 255, .62);
+  border-radius: 51% 49% 48% 52% / 49% 51% 53% 47%;
+  animation: sound-burst-wobble .5s ease-in-out infinite alternate;
+}
+@keyframes sound-burst-wobble {
+  from { transform: scale(.93, 1.05) rotate(-4deg); }
+  to { transform: scale(1.06, .95) rotate(5deg); }
+}
+
+/* Luz ambiente (ver spawnAmbientGlow, chamada de dentro de spawnAreaBurst):
+   um clarão grande, macio e desfocado que ilumina o chão ao redor do
+   impacto por baixo do burst nítido de sempre — dá peso de "explosão de
+   verdade iluminando o ambiente" em vez de só o efeito no próprio alvo.
+   z-index mais baixo que .area-burst (7) de propósito, pra ficar por trás. */
+.area-glow {
+  position: absolute;
+  transform: translate(-50%, -50%);
+  border-radius: 50%;
+  pointer-events: none;
+  z-index: 3;
+  filter: blur(6px);
+  animation: area-glow-pulse 900ms ease-out forwards;
+}
+
+@keyframes area-glow-pulse {
+  0% {
+    opacity: 0;
+    transform: translate(-50%, -50%) scale(0.5);
+  }
+  20% {
+    opacity: 0.6;
+  }
+  100% {
+    opacity: 0;
+    transform: translate(-50%, -50%) scale(1.7);
+  }
+}
+
+.area-glow-fire {
+  background: radial-gradient(circle, #ff8a3d 0%, transparent 70%);
+}
+
+.area-glow-frost {
+  background: radial-gradient(circle, #8ec6ff 0%, transparent 70%);
+}
+
+.area-glow-sound {
+  background: radial-gradient(circle, #fff27a 0%, transparent 70%);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .area-glow {
+    animation: none;
+    opacity: 0;
+  }
+}
